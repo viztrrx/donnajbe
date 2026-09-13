@@ -2056,14 +2056,52 @@
   }
 
   // Native fetch that bypasses the page's own monkey-patched window.fetch.
-  // Some sites (Quizlet/Edmentum is one) wrap window.fetch, and their
-  // wrapper can throw on our cross-origin API calls ("Invalid value"). We
-  // try transports in order until one works, then cache the winner:
-  //   1. a pristine fetch from a fresh about:blank iframe
-  //   2. XMLHttpRequest (rarely patched)
-  //   3. the page's own window.fetch (last resort)
+  // Some sites wrap window.fetch AND XMLHttpRequest (dropping our
+  // Authorization header or throwing "Invalid value" on cross-origin calls).
+  // We try transports in order until one works, then cache the winner:
+  //   1. a Web Worker from a blob URL — its own global scope, the page
+  //      cannot patch anything inside it (blocked only by strict CSP)
+  //   2. a pristine fetch from a fresh about:blank iframe
+  //   3. XMLHttpRequest (often still clean when fetch is patched)
+  //   4. the page's own window.fetch (last resort)
   // Each failure is logged to the console so the cause is never hidden.
   const iframeKeepAlive = []; // hold references so the frames are never GC'd
+
+  // The blob-worker transport: runs fetch inside a brand-new JS global.
+  // If CSP forbids blob: workers, `new Worker` throws and we fall through.
+  function makeWorkerFetch() {
+    return function workerFetch(url, opts) {
+      return new Promise((resolve, reject) => {
+        let w;
+        try {
+          const code = 'self.onmessage = async (e) => { const { url, opts } = e.data; try { const res = await fetch(url, opts); const text = await res.text(); self.postMessage({ ok: true, status: res.status, text }); } catch (err) { self.postMessage({ ok: false, error: String((err && err.message) || err) }); } };';
+          const blob = new Blob([code], { type: 'application/javascript' });
+          w = new Worker(URL.createObjectURL(blob));
+        } catch (e) {
+          reject(e);
+          return;
+        }
+        w.onmessage = (e) => {
+          const d = e.data;
+          w.terminate();
+          if (!d.ok) { reject(new TypeError(d.error)); return; }
+          const makeResponse = () => ({
+            ok: d.status >= 200 && d.status < 300,
+            status: d.status,
+            text: () => Promise.resolve(d.text),
+            json: () => Promise.resolve(JSON.parse(d.text)),
+            clone: () => makeResponse()
+          });
+          resolve(makeResponse());
+        };
+        w.onerror = (e) => {
+          w.terminate();
+          reject(new Error('worker fetch failed: ' + (e.message || 'unknown error')));
+        };
+        w.postMessage({ url, opts });
+      });
+    };
+  }
 
   function makeIframeFetch() {
     try {
@@ -2116,6 +2154,7 @@
       }
     }
     const chain = [];
+    try { chain.push({ name: 'worker', fn: makeWorkerFetch() }); } catch (e) { /* CSP or no Worker support */ }
     const iframeFetch = makeIframeFetch();
     if (iframeFetch) chain.push({ name: 'iframe', fn: iframeFetch });
     chain.push({ name: 'xhr', fn: xhrFetch });
