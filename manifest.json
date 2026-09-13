@@ -1,0 +1,7 @@
+{
+  "modules": [
+    { "name": "Insights", "url": "https://raw.githubusercontent.com/viztrrx/donnajbe/main/modules/automation.js" },
+    { "name": "Games", "url": "https://raw.githubusercontent.com/viztrrx/donnajbe/main/modules/games.js" },
+    { "name": "Music", "url": "https://raw.githubusercontent.com/viztrrx/donnajbe/main/modules/music.js" }
+  ]
+}
