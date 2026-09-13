@@ -2057,38 +2057,84 @@
 
   // Native fetch that bypasses the page's own monkey-patched window.fetch.
   // Some sites (Quizlet/Edmentum is one) wrap window.fetch, and their
-  // wrapper can throw on our cross-origin API calls ("Invalid value"). A
-  // fresh about:blank iframe hands us an untouched copy of native fetch;
-  // if that's unavailable, fall back to XMLHttpRequest.
-  const rawFetch = (function () {
+  // wrapper can throw on our cross-origin API calls ("Invalid value"). We
+  // try transports in order until one works, then cache the winner:
+  //   1. a pristine fetch from a fresh about:blank iframe
+  //   2. XMLHttpRequest (rarely patched)
+  //   3. the page's own window.fetch (last resort)
+  // Each failure is logged to the console so the cause is never hidden.
+  const iframeKeepAlive = []; // hold references so the frames are never GC'd
+
+  function makeIframeFetch() {
     try {
       const ifr = document.createElement('iframe');
       ifr.style.display = 'none';
       ifr.setAttribute('aria-hidden', 'true');
       document.documentElement.appendChild(ifr);
-      if (ifr.contentWindow && ifr.contentWindow.fetch) {
-        return ifr.contentWindow.fetch.bind(ifr.contentWindow);
+      const win = ifr.contentWindow;
+      if (win && typeof win.fetch === 'function') {
+        iframeKeepAlive.push(ifr);
+        return win.fetch.bind(win);
       }
-    } catch (e) { /* fall through to XHR */ }
-    return function xhrFetch(url, opts) {
-      opts = opts || {};
-      return new Promise((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open(opts.method || 'GET', url, true);
-        const headers = opts.headers || {};
-        Object.keys(headers).forEach((k) => { try { xhr.setRequestHeader(k, headers[k]); } catch (e) { /* skip */ } });
-        xhr.withCredentials = false;
-        xhr.onload = () => resolve({
-          ok: xhr.status >= 200 && xhr.status < 300,
-          status: xhr.status,
-          text: () => Promise.resolve(xhr.responseText),
-          json: () => Promise.resolve(JSON.parse(xhr.responseText))
-        });
-        xhr.onerror = () => reject(new TypeError('Failed to fetch'));
-        xhr.send(opts.body || null);
+    } catch (e) { /* fall through to the next transport */ }
+    return null;
+  }
+
+  function xhrFetch(url, opts) {
+    opts = opts || {};
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open(opts.method || 'GET', url, true);
+      const headers = opts.headers || {};
+      Object.keys(headers).forEach((k) => { try { xhr.setRequestHeader(k, headers[k]); } catch (e) { /* skip */ } });
+      xhr.withCredentials = false;
+      xhr.onload = () => resolve({
+        ok: xhr.status >= 200 && xhr.status < 300,
+        status: xhr.status,
+        text: () => Promise.resolve(xhr.responseText),
+        json: () => Promise.resolve(JSON.parse(xhr.responseText))
       });
-    };
-  })();
+      xhr.onerror = () => reject(new TypeError('Failed to fetch'));
+      xhr.send(opts.body || null);
+    });
+  }
+
+  let rawFetchCache = null; // the transport that last worked
+
+  async function rawFetch(url, opts) {
+    // Fast path: the transport that worked last time. If it has gone bad
+    // (some pages patch things after we cached it), drop the cache and
+    // fall through to the full chain below.
+    if (rawFetchCache) {
+      try {
+        return await rawFetchCache.fn(url, opts);
+      } catch (e) {
+        console.warn('[Agent Console] fetch transport "' + rawFetchCache.name + '" stopped working:', e && e.message);
+        rawFetchCache = null;
+      }
+    }
+    const chain = [];
+    const iframeFetch = makeIframeFetch();
+    if (iframeFetch) chain.push({ name: 'iframe', fn: iframeFetch });
+    chain.push({ name: 'xhr', fn: xhrFetch });
+    if (window.fetch) chain.push({ name: 'window', fn: window.fetch.bind(window) });
+
+    let lastErr = null;
+    for (const transport of chain) {
+      try {
+        const res = await transport.fn(url, opts);
+        rawFetchCache = transport;
+        if (transport.name !== 'iframe') {
+          console.info('[Agent Console] page fetch unavailable — using ' + transport.name + ' transport instead');
+        }
+        return res;
+      } catch (e) {
+        lastErr = e;
+        console.warn('[Agent Console] fetch transport "' + transport.name + '" failed:', e && e.message);
+      }
+    }
+    throw lastErr || new TypeError('Failed to fetch');
+  }
 
   async function callOpenAI(userText, systemText, imageDataUrls) {
     const key = getOpenAiKey();
