@@ -2461,6 +2461,10 @@
     if (OPENAI_PROXY) {
       headers['X-GPA-Key'] = key;
       payload._gpa_key = key;
+      // Tells the worker who is asking, so it can refuse a blocked user. Only
+      // an identifier — never the key. Best-effort: a modified client could
+      // omit it, which is why blocking is "soft"; see the admin console note.
+      if (typeof currentUser !== 'undefined' && currentUser) headers['X-GPA-User'] = currentUser;
     }
     const endpoint = OPENAI_PROXY
       ? `${OPENAI_PROXY}/v1/chat/completions`
@@ -2520,6 +2524,7 @@
 
   // Dispatches to whichever provider is selected in the Theme tab.
   async function callAI(userText, systemText, imageDataUrls) {
+    if (aiBlocked) throw new Error('Access to this tool has been blocked by the owner.');
     const provider = localStorage.getItem(PROVIDER_KEY) || 'gemini';
     // Order matters: admin standing instructions, then saved context, then the
     // caller's own system text LAST — the JSON-only rules several callers rely
@@ -2556,6 +2561,7 @@
     const statusMatch = msg.match(/\((\d{3})\)/);
     const status = statusMatch ? statusMatch[1] : null;
 
+    if (/blocked by the owner|blocked_by_owner/i.test(msg)) return 'Your access to this tool has been blocked by the owner.';
     if (/No .*API key provided/i.test(msg)) return 'No API key entered yet — try again and paste one when prompted.';
     if (/cannot be sent in a request header|Invalid value|refused header/i.test(msg)) {
       return 'Your saved API key has hidden characters in it — that happens when it is copied out of a styled page or document. Clear the key in Settings, then paste it again.';
@@ -7615,6 +7621,10 @@
   // free. Fire-and-forget: a failed beat never surfaces to the user.
   const TELE_SID = 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 9);
   let heartbeatTimer = null;
+  // Set true while this user is blocked, so callAI refuses locally too — the
+  // worker already refuses the OpenAI proxy, but Gemini goes direct to Google
+  // and only this client-side guard stops it.
+  let aiBlocked = false;
 
   function telemetryEndpoint() {
     return ((admGet(ADMIN_KEYS.TELE_ENDPOINT) || '').trim() || TELEMETRY_ENDPOINT || '').replace(/\/+$/, '');
@@ -7639,15 +7649,99 @@
         body: payload,
         keepalive: true,
         mode: 'cors'
-      }).catch(() => {});
+      }).then((r) => (r.ok ? r.json() : null)).then((s) => { if (s) applyModeration(s); }).catch(() => {});
     } catch (e) { /* best-effort */ }
   }
 
   // While the tool is open and someone is signed in, refresh presence so the
-  // owner's "active now" list is live. Cleared if telemetry is off.
+  // owner's "active now" list is live, and poll moderation status so a
+  // block/lock/kick reaches them quickly. Cleared if telemetry is off.
   function startHeartbeat() {
     if (heartbeatTimer || !telemetryOn()) return;
     heartbeatTimer = setInterval(() => { if (currentUser) sendBeat('beat'); }, 45000);
+    startStatusPolling();
+  }
+
+  // ---- Owner moderation (block / lock / kick) enforcement -------------------
+  // The owner sets a user's state from the admin console; every client polls
+  // its own status and applies it. Honest limitation: this runs in the user's
+  // own browser, so a determined user could edit it out. The real, un-editable
+  // lever is the worker refusing to proxy AI for a blocked user (see worker).
+  let statusTimer = null;
+  let modBaselineKick = null;   // kick counter we've already acted on this load
+  let modOverlayEl = null;
+
+  function startStatusPolling() {
+    if (statusTimer || !telemetryOn()) return;
+    statusTimer = setInterval(pollStatus, 15000);
+    pollStatus();
+  }
+  async function pollStatus() {
+    if (!telemetryOn() || !currentUser) return;
+    try {
+      const res = await fetch(telemetryEndpoint() + '/status?user=' + encodeURIComponent(currentUser));
+      if (!res.ok) return;
+      applyModeration(await res.json());
+    } catch (e) { /* best-effort */ }
+  }
+
+  function applyModeration(s) {
+    if (!s || typeof s !== 'object') return;
+    if (typeof s.kickNonce === 'number') {
+      // Baseline on the first status we see, so an old kick doesn't fire on
+      // load — only a kick issued while this session is live boots them.
+      if (modBaselineKick === null) modBaselineKick = s.kickNonce;
+      else if (s.kickNonce > modBaselineKick) {
+        modBaselineKick = s.kickNonce;
+        doKick(s.reason);
+        return;
+      }
+    }
+    if (s.state === 'blocked') showModOverlay('blocked', s.reason);
+    else if (s.state === 'locked') showModOverlay('locked', s.reason);
+    else hideModOverlay();
+  }
+
+  function showModOverlay(kind, reason) {
+    const t = THEMES[theme] || THEMES.dark;
+    if (getComputedStyle(panel).position === 'static') panel.style.position = 'relative';
+    if (!modOverlayEl) {
+      modOverlayEl = document.createElement('div');
+      modOverlayEl.style.cssText = 'position:absolute;inset:0;z-index:2147483000;display:flex;'
+        + 'flex-direction:column;align-items:center;justify-content:center;text-align:center;'
+        + 'padding:24px;gap:10px;backdrop-filter:blur(3px);';
+      panel.appendChild(modOverlayEl);
+    }
+    const blocked = kind === 'blocked';
+    modOverlayEl.style.background = blocked ? 'rgba(20,4,4,0.94)' : 'rgba(10,10,16,0.92)';
+    modOverlayEl.style.border = `2px solid ${blocked ? '#e5453a' : t.accent}`;
+    modOverlayEl.innerHTML =
+      `<div style="font-size:40px;">${blocked ? '⛔' : '🔒'}</div>`
+      + `<div style="font:700 15px/1.3 ui-monospace,monospace;color:${blocked ? '#ff6b6b' : t.accent};">`
+      + `${blocked ? 'Blocked by the owner' : 'Locked by the owner'}</div>`
+      + `<div style="font:12px/1.5 ui-monospace,monospace;color:#e8e8ea;max-width:280px;">`
+      + `${reason ? escapeHtml(reason) : (blocked ? 'Your access to this tool has been turned off.' : 'This tool is temporarily locked. Check back later.')}</div>`;
+    modOverlayEl.style.display = 'flex';
+    // Blocking should also cut AI use immediately, not just cover the panel.
+    aiBlocked = blocked;
+  }
+  function hideModOverlay() {
+    aiBlocked = false;
+    if (modOverlayEl) modOverlayEl.style.display = 'none';
+  }
+  function doKick(reason) {
+    hideModOverlay();
+    try { if (typeof saveProgress === 'function') saveProgress(); } catch (e) { /* ignore */ }
+    currentUser = null;
+    try { localStorage.removeItem(SESSION_KEY); } catch (e) { /* ignore */ }
+    if (statusTimer) { clearInterval(statusTimer); statusTimer = null; }
+    if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+    if (typeof refreshAccountUI === 'function') refreshAccountUI();
+    if (loginOverlay) loginOverlay.style.display = 'flex';
+    if (typeof setLockedChrome === 'function') setLockedChrome(true);
+    if (typeof showLoginMsg === 'function') {
+      showLoginMsg('You were signed out by the owner.' + (reason ? ' ' + reason : ''), true);
+    }
   }
 
   // The disclosure the end user sees. Shown once per browser when telemetry is
@@ -7808,20 +7902,38 @@
       const h = Math.round(m / 60);
       return h < 24 ? h + 'h ago' : Math.round(h / 24) + 'd ago';
     }
+    function stateBadge(state) {
+      if (state === 'blocked') return '<span style="color:#ff6b6b;font-weight:700;">⛔ blocked</span>';
+      if (state === 'locked') return '<span style="color:#eab308;font-weight:700;">🔒 locked</span>';
+      return '';
+    }
+    // The moderation buttons for one user, keyed by username via data-attrs.
+    function modButtons(user, state) {
+      const b = (action, label, title) =>
+        `<button class="gpa-btn gpa-mod-btn" data-mod-user="${escapeHtml(user)}" data-mod-action="${action}" title="${title}"`
+        + ` style="font-size:9px;padding:2px 6px;">${label}</button>`;
+      const parts = [];
+      if (state === 'blocked') parts.push(b('unblock', '✅ Unblock', 'Restore access'));
+      else parts.push(b('block', '⛔ Block', 'Blocked-by-owner page + cut off AI'));
+      if (state === 'locked') parts.push(b('unlock', '🔓 Unlock', 'Remove the lock'));
+      else if (state !== 'blocked') parts.push(b('lock', '🔒 Lock', 'Temporarily freeze their panel'));
+      parts.push(b('kick', '👢 Kick', 'Force a one-time sign-out'));
+      return `<div class="gpa-row" style="gap:4px;margin-top:4px;flex-wrap:wrap;">${parts.join('')}</div>`;
+    }
     function renderLive(data) {
       const active = data.active || [];
       const users = data.users || [];
       const dot = '<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#22c55e;margin-right:5px;box-shadow:0 0 6px #22c55e;"></span>';
-      const activeRows = active.map((s) => {
-        const where = [s.host, s.region, s.country].filter(Boolean).join(' · ');
-        return `<div class="gpa-admin-userrow">${dot}<b>${escapeHtml(s.user)}</b>`
-          + `<span>${escapeHtml(where)} · ${escapeHtml(ago(s.lastSeen))}</span></div>`;
-      }).join('');
-      const userRows = users.map((u) => {
-        const where = [u.country, u.region].filter(Boolean).join(' · ');
-        return `<div class="gpa-admin-userrow"><b>${escapeHtml(u.user)}</b>`
-          + `<span>${u.opens || 0}× · ${escapeHtml(where)} · last ${escapeHtml(ago(u.lastSeen))}</span></div>`;
-      }).join('');
+      const row = (name, meta, state) =>
+        `<div class="gpa-admin-userrow" style="flex-direction:column;align-items:stretch;">`
+        + `<div class="gpa-row" style="justify-content:space-between;gap:8px;">`
+        + `<span>${dot}<b>${escapeHtml(name)}</b> ${stateBadge(state)}</span>`
+        + `<span style="opacity:0.8;">${escapeHtml(meta)}</span></div>`
+        + modButtons(name, state) + `</div>`;
+      const activeRows = active.map((s) =>
+        row(s.user, [s.host, s.region, s.country].filter(Boolean).join(' · ') + ' · ' + ago(s.lastSeen), s.state)).join('');
+      const userRows = users.map((u) =>
+        row(u.user, (u.opens || 0) + '× · ' + [u.country, u.region].filter(Boolean).join(' · ') + ' · last ' + ago(u.lastSeen), u.state)).join('');
       teleLive.innerHTML =
         `<div class="gpa-admin-statcard" style="margin-bottom:8px;"><span class="n">${data.activeCount || 0}</span><div class="l">active right now</div></div>`
         + `<div class="gpa-sub" style="margin:4px 0;">Active now</div>`
@@ -7829,6 +7941,35 @@
         + `<div class="gpa-sub" style="margin:10px 0 4px;">Everyone who has ever opened it (${users.length})</div>`
         + `<div class="gpa-admin-users">${userRows || '<div class="gpa-sub">No users recorded yet.</div>'}</div>`;
     }
+
+    // One delegated handler for every moderation button.
+    async function moderate(user, action) {
+      const token = teleToken.value.trim();
+      const base = (teleEndpoint.value.trim() || TELEMETRY_ENDPOINT || '').replace(/\/+$/, '');
+      if (!token || !base) { teleMsg.textContent = 'Set the worker URL and admin token first.'; return; }
+      let reason = '';
+      if (action === 'block' || action === 'lock' || action === 'kick') {
+        reason = prompt(`Message to show ${user} (optional):`, '') || '';
+      }
+      teleMsg.textContent = `${action} ${user}…`;
+      try {
+        const res = await fetch(base + '/admin/moderate?token=' + encodeURIComponent(token), {
+          method: 'POST', headers: { 'Content-Type': 'text/plain' },
+          body: JSON.stringify({ user, action, reason })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+        teleMsg.textContent = `${user}: ${action} done.`;
+        loadLive();
+      } catch (e) {
+        teleMsg.textContent = 'Action failed: ' + e.message;
+      }
+    }
+    teleLive.addEventListener('click', (e) => {
+      const btn = e.target.closest('.gpa-mod-btn');
+      if (!btn) return;
+      moderate(btn.dataset.modUser, btn.dataset.modAction);
+    });
     async function loadLive() {
       saveTeleFields();
       const token = teleToken.value.trim();
