@@ -552,7 +552,7 @@
           <label for="gpa-custom-color" class="gpa-sub" style="flex:1;">Custom color (pick any shade)</label>
           <input type="color" id="gpa-custom-color" class="gpa-color-input" value="#8b5cf6" />
         </div>
-        <div class="gpa-sub" style="margin:14px 0 6px;">Account &amp; sync</div>
+        <div id="gpa-account-heading" class="gpa-sub" style="margin:14px 0 6px; cursor:default; user-select:none;">Account &amp; sync</div>
         <div class="gpa-row">
           <span id="gpa-account-who" class="gpa-sub">Not signed in</span>
           <button id="gpa-logout-btn" class="gpa-btn">Sign out</button>
@@ -647,6 +647,99 @@
           <button id="gpa-clear-key" class="gpa-btn">Clear saved Gemini key</button>
           <button id="gpa-clear-openai-key" class="gpa-btn">Clear saved OpenAI key</button>
           <button id="gpa-clear-yt-key" class="gpa-btn">Clear saved YouTube key</button>
+        </div>
+
+        <!-- Admin console: hidden until unlocked by the secret gesture on the
+             "Account & sync" heading (click it 5x) + PIN. Rendered here but
+             display:none, and re-hidden on every load. -->
+        <div id="gpa-admin" style="display:none; margin-top:16px; border-top:1px dashed var(--gpa-accent,#888); padding-top:12px;">
+          <div class="gpa-row" style="justify-content:space-between;">
+            <div class="gpa-sub gpa-admin-title">🛠 Admin console</div>
+            <button id="gpa-admin-lock" class="gpa-btn">🔒 Lock</button>
+          </div>
+
+          <div class="gpa-admin-note" id="gpa-admin-reality"></div>
+
+          <div class="gpa-admin-tabs">
+            <button class="gpa-admin-tab primary" data-atab="usage">📊 Usage</button>
+            <button class="gpa-admin-tab" data-atab="tools">⚙️ Power tools</button>
+            <button class="gpa-admin-tab" data-atab="data">🗄 Data</button>
+          </div>
+
+          <!-- Usage / logs -->
+          <div class="gpa-admin-pane active" data-apane="usage">
+            <div id="gpa-admin-stats" class="gpa-admin-stats"></div>
+            <div class="gpa-row" style="margin-top:8px; flex-wrap:wrap;">
+              <button id="gpa-admin-refresh" class="gpa-btn" style="flex:1;">↻ Refresh</button>
+              <button id="gpa-admin-export-logs" class="gpa-btn" style="flex:1;">⬇ Export logs</button>
+              <button id="gpa-admin-clear-logs" class="gpa-btn" style="flex:1;">🗑 Clear logs</button>
+            </div>
+            <div class="gpa-sub" style="margin:12px 0 4px;">Everyone seen on this browser</div>
+            <div id="gpa-admin-users" class="gpa-admin-users"></div>
+            <div class="gpa-sub" style="margin:12px 0 4px;">Recent activity</div>
+            <div id="gpa-admin-log" class="gpa-admin-log"></div>
+
+            <div class="gpa-sub" style="margin:16px 0 4px;">Cross-device telemetry (see other people, not just this browser)</div>
+            <div class="gpa-admin-note">
+              This is the only way to see opens from other people's devices. It needs a shared
+              JSONBin the owner sets up, and — honestly — a key placed in a public script can't be
+              kept owner-only, so treat these logs as low-security. When it's on, anyone who opens
+              the tool sees a one-time notice that usage is recorded. It's off until you turn it on.
+            </div>
+            <div class="gpa-row" style="margin-top:6px;">
+              <input id="gpa-tele-bin" class="gpa-input" placeholder="Shared Bin ID (logs)" autocomplete="off" />
+            </div>
+            <div class="gpa-row">
+              <input id="gpa-tele-key" class="gpa-input" type="password" placeholder="X-Master-Key for that bin" autocomplete="off" />
+            </div>
+            <div class="gpa-row" style="flex-wrap:wrap;">
+              <button id="gpa-tele-toggle" class="gpa-btn" style="flex:1;">Telemetry: OFF</button>
+              <button id="gpa-tele-pull" class="gpa-btn" style="flex:1;">⬇ Pull remote logs</button>
+            </div>
+            <div id="gpa-tele-msg" class="gpa-sub" style="margin-top:4px;"></div>
+          </div>
+
+          <!-- Power tools -->
+          <div class="gpa-admin-pane" data-apane="tools">
+            <div class="gpa-sub" style="margin:4px 0 4px;">Model override (both providers)</div>
+            <div class="gpa-row">
+              <input id="gpa-adm-model" class="gpa-input" placeholder="e.g. gpt-4o, gemini-2.0-flash — blank = default" autocomplete="off" />
+            </div>
+            <div class="gpa-sub" style="margin:12px 0 4px;">System-prompt prefix (prepended to every AI call)</div>
+            <textarea id="gpa-adm-sysprefix" class="gpa-sync-box" style="height:70px;" placeholder="Extra standing instructions for the AI on every request…"></textarea>
+            <div class="gpa-row" style="margin-top:8px;">
+              <label class="gpa-sub" style="flex:1;">Max page characters sent</label>
+              <input id="gpa-adm-maxchars" class="gpa-input" type="number" min="1000" max="200000" step="1000" style="max-width:120px;" />
+            </div>
+            <div class="gpa-row" style="margin-top:8px;">
+              <label class="gpa-sub" style="flex:1;">Temperature (OpenAI, 0–2)</label>
+              <input id="gpa-adm-temp" class="gpa-input" type="number" min="0" max="2" step="0.1" style="max-width:120px;" placeholder="default" />
+            </div>
+            <div class="gpa-row" style="margin-top:10px; flex-wrap:wrap;">
+              <button id="gpa-adm-save-tools" class="gpa-btn primary" style="flex:1;">Save power settings</button>
+              <button id="gpa-adm-reset-tools" class="gpa-btn" style="flex:1;">Reset to defaults</button>
+            </div>
+            <div class="gpa-sub" style="margin:16px 0 4px;">Raw AI playground</div>
+            <textarea id="gpa-adm-play-sys" class="gpa-sync-box" style="height:50px;" placeholder="System prompt (optional)"></textarea>
+            <textarea id="gpa-adm-play-user" class="gpa-sync-box" style="height:60px;" placeholder="User message — send straight to the model, bypassing all the panel's own prompts"></textarea>
+            <div class="gpa-row">
+              <button id="gpa-adm-play-run" class="gpa-btn primary" style="flex:1;">▶ Run raw prompt</button>
+            </div>
+            <div id="gpa-adm-play-out" class="gpa-admin-log" style="margin-top:6px;"></div>
+            <div id="gpa-adm-tools-msg" class="gpa-sub" style="margin-top:4px;"></div>
+          </div>
+
+          <!-- Data -->
+          <div class="gpa-admin-pane" data-apane="data">
+            <div class="gpa-sub" style="margin:4px 0 4px;">Every gpa_* value in this browser (editable)</div>
+            <div id="gpa-adm-ls" class="gpa-admin-ls"></div>
+            <div class="gpa-row" style="margin-top:8px; flex-wrap:wrap;">
+              <button id="gpa-adm-ls-refresh" class="gpa-btn" style="flex:1;">↻ Refresh</button>
+              <button id="gpa-adm-dump" class="gpa-btn" style="flex:1;">⬇ Export everything</button>
+              <button id="gpa-adm-wipe" class="gpa-btn" style="flex:1;">💥 Wipe all data</button>
+            </div>
+            <div id="gpa-adm-data-msg" class="gpa-sub" style="margin-top:4px;"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -1233,6 +1326,45 @@
         font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, 'Courier New', monospace;
       }
       .gpa-sync-box:focus { border-color: ${t.accent}; }
+      /* ---- Admin console ---- */
+      .gpa-admin-title { font-weight: 700; color: ${t.accent}; }
+      .gpa-admin-note {
+        font-size: 10px; line-height: 1.5; color: ${t.sub}; margin: 8px 0;
+        padding: 7px 9px; background: ${t.field}; border: 1px solid ${t.border};
+        border-radius: 6px;
+      }
+      .gpa-admin-tabs { display: flex; gap: 5px; margin: 10px 0 8px; flex-wrap: wrap; }
+      .gpa-admin-tab { font-size: 10px; padding: 4px 9px; }
+      .gpa-admin-pane { display: none; }
+      .gpa-admin-pane.active { display: block; }
+      .gpa-admin-stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+      .gpa-admin-statcard {
+        padding: 8px 10px; background: ${t.field}; border: 1px solid ${t.border};
+        border-radius: 7px; text-align: center;
+      }
+      .gpa-admin-statcard .n { font-size: 18px; font-weight: 800; color: ${t.accent}; display: block; }
+      .gpa-admin-statcard .l { font-size: 9px; color: ${t.sub}; margin-top: 2px; }
+      .gpa-admin-users, .gpa-admin-log, .gpa-admin-ls {
+        max-height: 190px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px;
+      }
+      .gpa-admin-userrow, .gpa-admin-logrow {
+        display: flex; justify-content: space-between; gap: 8px; align-items: baseline;
+        padding: 5px 8px; background: ${t.field}; border: 1px solid ${t.border};
+        border-radius: 5px; font-size: 10px;
+        font-family: 'JetBrains Mono', ui-monospace, monospace;
+      }
+      .gpa-admin-userrow b { color: ${t.accent}; font-weight: 700; }
+      .gpa-admin-logrow .t { color: ${t.sub}; white-space: nowrap; }
+      .gpa-admin-logrow .ev { flex: 1; overflow-wrap: anywhere; }
+      .gpa-admin-ls-row { display: flex; flex-direction: column; gap: 3px; padding: 6px 8px;
+        background: ${t.field}; border: 1px solid ${t.border}; border-radius: 5px; }
+      .gpa-admin-ls-row .k { font-size: 9.5px; color: ${t.accent}; font-weight: 700; overflow-wrap: anywhere; }
+      .gpa-admin-ls-row textarea {
+        width: 100%; min-height: 34px; background: ${t.panel}; color: ${t.text};
+        border: 1px solid ${t.border}; border-radius: 4px; font-size: 9px; padding: 4px;
+        font-family: 'JetBrains Mono', ui-monospace, monospace; resize: vertical;
+      }
+      .gpa-admin-ls-row .gpa-btn { align-self: flex-end; font-size: 9px; padding: 2px 7px; }
       .gpa-pause-stats { display: flex; flex-direction: column; gap: 5px; }
       .gpa-pause-stat {
         display: flex; justify-content: space-between; align-items: center; gap: 10px;
@@ -2057,6 +2189,31 @@
     }
   }
 
+  // ---- Admin overrides ------------------------------------------------------
+  // The admin console (unlocked with a PIN, see far below) can override a few
+  // engine settings. They live in their own localStorage keys, kept out of
+  // profile snapshots so they're device-global and survive sign-in/sign-out.
+  // Honest note: the PIN and these keys are all client-side. Anyone who reads
+  // this file sees the PIN, and anyone with DevTools can read/write these keys.
+  // This is a soft lock and a personal dashboard, not real access control.
+  const ADMIN_PIN = '1029';
+  const ADMIN_KEYS = {
+    MODEL: 'gpa_admin_model',
+    SYSPREFIX: 'gpa_admin_sysprefix',
+    MAXCHARS: 'gpa_admin_maxchars',
+    TEMP: 'gpa_admin_temp',
+    LOGS: 'gpa_admin_logs',
+    TELE_ON: 'gpa_admin_tele_on',
+    TELE_BIN: 'gpa_admin_tele_bin',
+    TELE_KEY: 'gpa_admin_tele_key',
+    TELE_NOTICE_SEEN: 'gpa_tele_notice_seen'
+  };
+  function admGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+  function effectiveModel(dflt) { const m = (admGet(ADMIN_KEYS.MODEL) || '').trim(); return m || dflt; }
+  function effectiveMaxPageChars() { const n = parseInt(admGet(ADMIN_KEYS.MAXCHARS), 10); return (n && n >= 1000) ? n : MAX_PAGE_CHARS; }
+  function effectiveTemp() { const v = parseFloat(admGet(ADMIN_KEYS.TEMP)); return isNaN(v) ? null : Math.max(0, Math.min(2, v)); }
+  function adminSysPrefix() { const p = (admGet(ADMIN_KEYS.SYSPREFIX) || '').trim(); return p ? p + '\n\n' : ''; }
+
   // ---- Gemini API helpers -----------------------------------------------
   function getApiKey() {
     let key = sanitizeKey(API_KEY_DEFAULT) || readStoredKey(STORAGE_KEY);
@@ -2084,7 +2241,7 @@
     const body = { contents: [{ role: 'user', parts }] };
     if (systemText) body.systemInstruction = { parts: [{ text: systemText }] };
 
-    const res = await rawFetch(`${API_BASE}${MODEL}:generateContent?key=${key}`, {
+    const res = await rawFetch(`${API_BASE}${effectiveModel(MODEL)}:generateContent?key=${key}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
@@ -2301,6 +2458,10 @@
       ? `${OPENAI_PROXY}/v1/chat/completions`
       : 'https://api.openai.com/v1/chat/completions';
 
+    payload.model = effectiveModel(OPENAI_MODEL);
+    const temp = effectiveTemp();
+    if (temp !== null) payload.temperature = temp;
+
     const res = await rawFetch(endpoint, {
       method: 'POST',
       headers,
@@ -2352,11 +2513,10 @@
   // Dispatches to whichever provider is selected in the Theme tab.
   async function callAI(userText, systemText, imageDataUrls) {
     const provider = localStorage.getItem(PROVIDER_KEY) || 'gemini';
-    // Memory goes in FRONT of the caller's system text, never behind it: the
-    // JSON-only response rules several callers rely on have to be the last
-    // word, or the model starts narrating what it remembered.
-    const memory = buildContextMemory();
-    const sys = memory ? memory + (systemText || '') : systemText;
+    // Order matters: admin standing instructions, then saved context, then the
+    // caller's own system text LAST — the JSON-only rules several callers rely
+    // on have to be the final word, or the model narrates instead of obeying.
+    const sys = adminSysPrefix() + buildContextMemory() + (systemText || '');
     return provider === 'openai'
       ? callOpenAI(userText, sys, imageDataUrls)
       : callGemini(userText, sys, imageDataUrls);
@@ -3549,7 +3709,8 @@
     clone.querySelectorAll('script,style,noscript,svg,canvas,iframe').forEach((el) => el.remove());
     let text = clone.innerText || clone.textContent || '';
     text = text.replace(/\n{3,}/g, '\n\n').trim();
-    if (text.length > MAX_PAGE_CHARS) text = text.slice(0, MAX_PAGE_CHARS) + '\n\n[...truncated...]';
+    const cap = effectiveMaxPageChars();
+    if (text.length > cap) text = text.slice(0, cap) + '\n\n[...truncated...]';
     return text;
   }
 
@@ -4868,7 +5029,15 @@
   const CLOUD_SECRET_KEY = 'gpa_cloud_key';
   // Keys that identify the session/profiles themselves must never be swept
   // into a profile snapshot, or restoring one would clobber the login system.
-  const NON_PROFILE_KEYS = [SESSION_KEY, CLOUD_BIN_KEY, CLOUD_SECRET_KEY];
+  // The admin keys and the usage log are device-global on purpose: they belong
+  // to this browser/owner, not to whichever profile happens to be signed in,
+  // so restoring a profile must leave them untouched.
+  const NON_PROFILE_KEYS = [
+    SESSION_KEY, CLOUD_BIN_KEY, CLOUD_SECRET_KEY,
+    ADMIN_KEYS.MODEL, ADMIN_KEYS.SYSPREFIX, ADMIN_KEYS.MAXCHARS, ADMIN_KEYS.TEMP,
+    ADMIN_KEYS.LOGS, ADMIN_KEYS.TELE_ON, ADMIN_KEYS.TELE_BIN, ADMIN_KEYS.TELE_KEY,
+    ADMIN_KEYS.TELE_NOTICE_SEEN
+  ];
 
   const loginOverlay = panel.querySelector('#gpa-login');
   const loginUserInput = panel.querySelector('#gpa-login-user');
@@ -4994,6 +5163,10 @@
   function enterApp(user) {
     currentUser = user;
     localStorage.setItem(SESSION_KEY, user);
+    // Record the open in the local usage log, and mirror it to the shared
+    // telemetry bin if the owner turned that on. Wrapped so a logging hiccup
+    // can never block a sign-in.
+    try { logUsageEvent('open', user); } catch (e) { /* logging is best-effort */ }
     loginOverlay.style.display = 'none';
     setLockedChrome(false);
     refreshAccountUI();
@@ -7394,6 +7567,339 @@
       cloudMsg.textContent = 'Download failed: ' + e.message;
     }
   });
+
+  // ---- Usage logging --------------------------------------------------------
+  // A record of who opened the tool and when. Local by default: it only ever
+  // sees THIS browser, because localStorage is per-origin per-device and no
+  // other instance can reach it. Cross-device visibility needs the telemetry
+  // bin below. Entries: u=username, ev=event, ts=time, url, host, ua.
+  const LOG_CAP = 400; // keep the newest N; the log is not an archive
+
+  function readLogs() {
+    try { const a = JSON.parse(localStorage.getItem(ADMIN_KEYS.LOGS) || '[]'); return Array.isArray(a) ? a : []; }
+    catch (e) { return []; }
+  }
+  function writeLogs(arr) {
+    try { localStorage.setItem(ADMIN_KEYS.LOGS, JSON.stringify(arr.slice(-LOG_CAP))); } catch (e) { /* quota */ }
+  }
+  function logUsageEvent(ev, user) {
+    const entry = {
+      u: user || currentUser || '(anonymous)',
+      ev,
+      ts: Date.now(),
+      url: location.href.slice(0, 300),
+      host: location.hostname,
+      ua: (navigator.userAgent || '').slice(0, 160)
+    };
+    const arr = readLogs();
+    arr.push(entry);
+    writeLogs(arr);
+    maybePushTelemetry(entry);
+    maybeShowTelemetryNotice();
+  }
+
+  // ---- Cross-device telemetry (opt-in, disclosed) ---------------------------
+  // Sends each open to a shared JSONBin the owner configures, so opens from
+  // OTHER people's devices land somewhere the owner can read. Read-modify-write
+  // (JSONBin holds one record per bin). Fire-and-forget: a failed push must
+  // never disrupt the person using the tool.
+  function telemetryOn() { return admGet(ADMIN_KEYS.TELE_ON) === 'on'; }
+  function telemetryCreds() {
+    return { bin: (admGet(ADMIN_KEYS.TELE_BIN) || '').trim(), key: (admGet(ADMIN_KEYS.TELE_KEY) || '').trim() };
+  }
+  async function maybePushTelemetry(entry) {
+    if (!telemetryOn()) return;
+    const { bin, key } = telemetryCreds();
+    if (!bin || !key) return;
+    try {
+      const cur = await fetch(`https://api.jsonbin.io/v3/b/${encodeURIComponent(bin)}/latest`, {
+        headers: { 'X-Master-Key': key }
+      }).then((r) => r.ok ? r.json() : null).catch(() => null);
+      const rec = (cur && (cur.record || cur)) || {};
+      const logs = Array.isArray(rec.logs) ? rec.logs : [];
+      logs.push(entry);
+      await fetch(`https://api.jsonbin.io/v3/b/${encodeURIComponent(bin)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-Master-Key': key },
+        body: JSON.stringify({ logs: logs.slice(-2000) })
+      });
+    } catch (e) { /* telemetry is best-effort and must never surface to the user */ }
+  }
+
+  // The disclosure the end user sees. Shown once per browser when telemetry is
+  // active — the difference between analytics and covert tracking is that the
+  // people being logged are told. Deliberately not removable by config.
+  function maybeShowTelemetryNotice() {
+    if (!telemetryOn()) return;
+    if (admGet(ADMIN_KEYS.TELE_NOTICE_SEEN) === 'yes') return;
+    try { localStorage.setItem(ADMIN_KEYS.TELE_NOTICE_SEEN, 'yes'); } catch (e) { /* ignore */ }
+    const t = THEMES[theme] || THEMES.dark;
+    const toast = document.createElement('div');
+    toast.style.cssText = `position:fixed;left:12px;bottom:12px;z-index:2147483647;max-width:320px;
+      background:${t.panel};color:${t.text};border:1px solid ${t.accent};border-radius:10px;
+      padding:11px 13px;font:11px/1.5 ui-monospace,monospace;box-shadow:0 8px 26px rgba(0,0,0,0.5);`;
+    toast.textContent = 'Heads up: this assistant records basic usage (the profile name you sign in with and when you open it) for its owner. Nothing you type is sent.';
+    const ok = document.createElement('button');
+    ok.textContent = 'OK';
+    ok.style.cssText = `display:block;margin-top:8px;margin-left:auto;font:11px/1 inherit;
+      padding:4px 12px;border-radius:6px;cursor:pointer;background:transparent;color:${t.text};border:1px solid ${t.accent};`;
+    ok.addEventListener('click', () => toast.remove());
+    toast.appendChild(ok);
+    document.body.appendChild(toast);
+    setTimeout(() => { if (toast.parentNode) toast.remove(); }, 15000);
+  }
+
+  // ---- Admin console --------------------------------------------------------
+  (function adminConsole() {
+    const adminBox = panel.querySelector('#gpa-admin');
+    const heading = panel.querySelector('#gpa-account-heading');
+    if (!adminBox || !heading) return;
+    let adminUnlocked = false;   // resets every injection — PIN is required each session
+
+    // Reality check shown inside the panel, so the owner is never misled about
+    // what this actually protects.
+    const reality = panel.querySelector('#gpa-admin-reality');
+    if (reality) {
+      reality.className = 'gpa-admin-note';
+      reality.textContent = 'Reality check: this PIN and every setting here live in your browser. '
+        + 'Anyone who reads the script source can see the PIN, and anyone with DevTools can open this. '
+        + 'Treat it as a personal dashboard and a soft lock — not real security. Do not put anything truly sensitive behind it.';
+    }
+
+    // ---- Hidden trigger: five quick clicks on the "Account & sync" heading ----
+    let clicks = 0, clickTimer = null;
+    heading.addEventListener('click', () => {
+      if (adminUnlocked) return;
+      clicks++;
+      clearTimeout(clickTimer);
+      clickTimer = setTimeout(() => { clicks = 0; }, 1200);
+      if (clicks >= 5) {
+        clicks = 0;
+        const pin = prompt('Enter admin PIN:');
+        if (pin === null) return;
+        if (pin.trim() === ADMIN_PIN) { adminUnlocked = true; openAdmin(); }
+        else alert('Incorrect PIN.');
+      }
+    });
+
+    function openAdmin() {
+      adminBox.style.display = 'block';
+      loadPowerToolFields();
+      loadTelemetryFields();
+      renderUsage();
+      adminBox.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    panel.querySelector('#gpa-admin-lock').addEventListener('click', () => {
+      adminUnlocked = false;
+      adminBox.style.display = 'none';
+    });
+
+    // ---- Admin tab switching ----
+    adminBox.querySelectorAll('.gpa-admin-tab').forEach((tab) => {
+      tab.addEventListener('click', () => {
+        adminBox.querySelectorAll('.gpa-admin-tab').forEach((x) => x.classList.toggle('primary', x === tab));
+        const name = tab.dataset.atab;
+        adminBox.querySelectorAll('.gpa-admin-pane').forEach((p) => p.classList.toggle('active', p.dataset.apane === name));
+        if (name === 'usage') renderUsage();
+        if (name === 'data') renderLsEditor();
+      });
+    });
+
+    // ---- Usage pane ----
+    function fmtTime(ts) { return new Date(ts).toLocaleString(); }
+    function renderUsage() {
+      const logs = readLogs();
+      const opens = logs.filter((l) => l.ev === 'open');
+      const users = {};
+      opens.forEach((l) => {
+        const u = l.u || '(anonymous)';
+        if (!users[u]) users[u] = { count: 0, first: l.ts, last: l.ts };
+        users[u].count++;
+        users[u].first = Math.min(users[u].first, l.ts);
+        users[u].last = Math.max(users[u].last, l.ts);
+      });
+      const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
+      const todayOpens = opens.filter((l) => l.ts >= startOfDay.getTime()).length;
+
+      const stats = [
+        { n: opens.length, l: 'Total opens' },
+        { n: Object.keys(users).length, l: 'Unique users' },
+        { n: todayOpens, l: 'Opens today' },
+        { n: logs.length, l: 'Log entries' }
+      ];
+      panel.querySelector('#gpa-admin-stats').innerHTML = stats.map((s) =>
+        `<div class="gpa-admin-statcard"><span class="n">${s.n}</span><div class="l">${escapeHtml(s.l)}</div></div>`).join('');
+
+      const userRows = Object.keys(users).sort((a, b) => users[b].last - users[a].last).map((u) => {
+        const info = users[u];
+        return `<div class="gpa-admin-userrow"><b>${escapeHtml(u)}</b>`
+          + `<span>${info.count}× · last ${escapeHtml(fmtTime(info.last))}</span></div>`;
+      }).join('');
+      panel.querySelector('#gpa-admin-users').innerHTML = userRows || '<div class="gpa-sub">No sign-ins recorded on this browser yet.</div>';
+
+      const logRows = logs.slice().reverse().slice(0, 120).map((l) =>
+        `<div class="gpa-admin-logrow"><span class="ev"><b>${escapeHtml(l.u || '?')}</b> · ${escapeHtml(l.ev)} · ${escapeHtml(l.host || '')}</span>`
+        + `<span class="t">${escapeHtml(fmtTime(l.ts))}</span></div>`).join('');
+      panel.querySelector('#gpa-admin-log').innerHTML = logRows || '<div class="gpa-sub">Nothing logged yet.</div>';
+    }
+    panel.querySelector('#gpa-admin-refresh').addEventListener('click', renderUsage);
+    panel.querySelector('#gpa-admin-clear-logs').addEventListener('click', () => {
+      if (!confirm('Clear the local usage log on this browser? (Remote telemetry logs are not affected.)')) return;
+      writeLogs([]);
+      renderUsage();
+    });
+    panel.querySelector('#gpa-admin-export-logs').addEventListener('click', () => {
+      const blob = JSON.stringify(readLogs(), null, 2);
+      navigator.clipboard.writeText(blob).then(
+        () => alert('Usage log copied to clipboard as JSON.'),
+        () => { const w = window.open('', '_blank'); if (w) w.document.write('<pre>' + escapeHtml(blob) + '</pre>'); }
+      );
+    });
+
+    // ---- Telemetry controls ----
+    const teleBin = panel.querySelector('#gpa-tele-bin');
+    const teleKey = panel.querySelector('#gpa-tele-key');
+    const teleToggle = panel.querySelector('#gpa-tele-toggle');
+    const teleMsg = panel.querySelector('#gpa-tele-msg');
+    function loadTelemetryFields() {
+      teleBin.value = admGet(ADMIN_KEYS.TELE_BIN) || '';
+      teleKey.value = admGet(ADMIN_KEYS.TELE_KEY) || '';
+      teleToggle.textContent = telemetryOn() ? 'Telemetry: ON' : 'Telemetry: OFF';
+      teleToggle.classList.toggle('primary', telemetryOn());
+    }
+    function saveTeleCreds() {
+      localStorage.setItem(ADMIN_KEYS.TELE_BIN, teleBin.value.trim());
+      localStorage.setItem(ADMIN_KEYS.TELE_KEY, teleKey.value.trim());
+    }
+    teleBin.addEventListener('change', saveTeleCreds);
+    teleKey.addEventListener('change', saveTeleCreds);
+    teleToggle.addEventListener('click', () => {
+      saveTeleCreds();
+      const turningOn = !telemetryOn();
+      if (turningOn && (!teleBin.value.trim() || !teleKey.value.trim())) {
+        teleMsg.textContent = 'Add a shared Bin ID and its master key first.';
+        return;
+      }
+      localStorage.setItem(ADMIN_KEYS.TELE_ON, turningOn ? 'on' : 'off');
+      // Re-arm the end-user notice each time it's switched on, so people are
+      // told again after any pause in collection.
+      if (turningOn) localStorage.removeItem(ADMIN_KEYS.TELE_NOTICE_SEEN);
+      loadTelemetryFields();
+      teleMsg.textContent = turningOn
+        ? 'On. Opens from every device pointed at this bin will collect here. Users see a one-time notice.'
+        : 'Off. Only this browser is logged now.';
+    });
+    panel.querySelector('#gpa-tele-pull').addEventListener('click', async () => {
+      saveTeleCreds();
+      const bin = teleBin.value.trim(), key = teleKey.value.trim();
+      if (!bin || !key) { teleMsg.textContent = 'Add a shared Bin ID and its master key first.'; return; }
+      teleMsg.textContent = 'Pulling…';
+      try {
+        const json = await fetch(`https://api.jsonbin.io/v3/b/${encodeURIComponent(bin)}/latest`, {
+          headers: { 'X-Master-Key': key }
+        }).then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
+        const rec = (json && (json.record || json)) || {};
+        const remote = Array.isArray(rec.logs) ? rec.logs : [];
+        // Merge remote into the local view, de-duped by user+event+timestamp.
+        const seen = new Set(readLogs().map((l) => l.u + '|' + l.ev + '|' + l.ts));
+        const merged = readLogs();
+        remote.forEach((l) => { const id = l.u + '|' + l.ev + '|' + l.ts; if (!seen.has(id)) { seen.add(id); merged.push(l); } });
+        merged.sort((a, b) => a.ts - b.ts);
+        writeLogs(merged);
+        renderUsage();
+        teleMsg.textContent = `Pulled ${remote.length} remote entr${remote.length === 1 ? 'y' : 'ies'}.`;
+      } catch (e) {
+        teleMsg.textContent = 'Pull failed: ' + e.message;
+      }
+    });
+
+    // ---- Power tools ----
+    function loadPowerToolFields() {
+      panel.querySelector('#gpa-adm-model').value = admGet(ADMIN_KEYS.MODEL) || '';
+      panel.querySelector('#gpa-adm-sysprefix').value = admGet(ADMIN_KEYS.SYSPREFIX) || '';
+      panel.querySelector('#gpa-adm-maxchars').value = admGet(ADMIN_KEYS.MAXCHARS) || String(MAX_PAGE_CHARS);
+      panel.querySelector('#gpa-adm-temp').value = admGet(ADMIN_KEYS.TEMP) || '';
+    }
+    panel.querySelector('#gpa-adm-save-tools').addEventListener('click', () => {
+      const set = (k, v) => { v = String(v).trim(); if (v) localStorage.setItem(k, v); else localStorage.removeItem(k); };
+      set(ADMIN_KEYS.MODEL, panel.querySelector('#gpa-adm-model').value);
+      set(ADMIN_KEYS.SYSPREFIX, panel.querySelector('#gpa-adm-sysprefix').value);
+      set(ADMIN_KEYS.MAXCHARS, panel.querySelector('#gpa-adm-maxchars').value);
+      set(ADMIN_KEYS.TEMP, panel.querySelector('#gpa-adm-temp').value);
+      panel.querySelector('#gpa-adm-tools-msg').textContent = 'Saved. Applies to the next AI request.';
+    });
+    panel.querySelector('#gpa-adm-reset-tools').addEventListener('click', () => {
+      [ADMIN_KEYS.MODEL, ADMIN_KEYS.SYSPREFIX, ADMIN_KEYS.MAXCHARS, ADMIN_KEYS.TEMP].forEach((k) => localStorage.removeItem(k));
+      loadPowerToolFields();
+      panel.querySelector('#gpa-adm-tools-msg').textContent = 'Reset to defaults.';
+    });
+    panel.querySelector('#gpa-adm-play-run').addEventListener('click', async () => {
+      const out = panel.querySelector('#gpa-adm-play-out');
+      const userMsg = panel.querySelector('#gpa-adm-play-user').value.trim();
+      const sysMsg = panel.querySelector('#gpa-adm-play-sys').value.trim();
+      if (!userMsg) { out.textContent = 'Type a user message first.'; return; }
+      out.textContent = 'Running…';
+      try {
+        // Straight to the provider — but callAI still prepends admin prefix and
+        // any saved context, which is usually what a power user wants to test.
+        const res = await callAI(userMsg, sysMsg || undefined);
+        out.textContent = res;
+      } catch (e) {
+        out.textContent = 'Error: ' + ((e && e.message) || e);
+      }
+    });
+
+    // ---- Data pane: localStorage inspector ----
+    function renderLsEditor() {
+      const wrap = panel.querySelector('#gpa-adm-ls');
+      wrap.innerHTML = '';
+      const keys = [];
+      for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith('gpa_')) keys.push(k); }
+      keys.sort();
+      if (!keys.length) { wrap.innerHTML = '<div class="gpa-sub">No gpa_ keys stored.</div>'; return; }
+      keys.forEach((k) => {
+        const row = document.createElement('div');
+        row.className = 'gpa-admin-ls-row';
+        const kEl = document.createElement('div');
+        kEl.className = 'k';
+        kEl.textContent = k;
+        const ta = document.createElement('textarea');
+        ta.value = localStorage.getItem(k) || '';
+        const rowBtns = document.createElement('div');
+        rowBtns.style.cssText = 'display:flex;gap:6px;justify-content:flex-end;';
+        const save = document.createElement('button');
+        save.className = 'gpa-btn';
+        save.textContent = 'Save';
+        save.addEventListener('click', () => { localStorage.setItem(k, ta.value); save.textContent = '✓'; setTimeout(() => (save.textContent = 'Save'), 800); });
+        const del = document.createElement('button');
+        del.className = 'gpa-btn';
+        del.textContent = 'Delete';
+        del.addEventListener('click', () => { if (confirm('Delete ' + k + '?')) { localStorage.removeItem(k); renderLsEditor(); } });
+        rowBtns.appendChild(save); rowBtns.appendChild(del);
+        row.appendChild(kEl); row.appendChild(ta); row.appendChild(rowBtns);
+        wrap.appendChild(row);
+      });
+    }
+    panel.querySelector('#gpa-adm-ls-refresh').addEventListener('click', renderLsEditor);
+    panel.querySelector('#gpa-adm-dump').addEventListener('click', () => {
+      const dump = {};
+      for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith('gpa_')) dump[k] = localStorage.getItem(k); }
+      const blob = JSON.stringify(dump, null, 2);
+      navigator.clipboard.writeText(blob).then(
+        () => { panel.querySelector('#gpa-adm-data-msg').textContent = 'All gpa_ data copied to clipboard.'; },
+        () => { const w = window.open('', '_blank'); if (w) w.document.write('<pre>' + escapeHtml(blob) + '</pre>'); }
+      );
+    });
+    panel.querySelector('#gpa-adm-wipe').addEventListener('click', () => {
+      if (!confirm('Wipe ALL of this tool\'s data on this browser — profiles, settings, logs, keys? This cannot be undone.')) return;
+      if (!confirm('Really wipe everything? Last chance.')) return;
+      const keys = [];
+      for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith('gpa_')) keys.push(k); }
+      keys.forEach((k) => localStorage.removeItem(k));
+      panel.querySelector('#gpa-adm-data-msg').textContent = 'Wiped. Reload the tool to start fresh.';
+      renderLsEditor();
+    });
+  })();
 
   // ---- Session restore on load ----
   // If this browser already had someone signed in, skip straight back in.
