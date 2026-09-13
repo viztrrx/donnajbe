@@ -1946,6 +1946,9 @@
   }
 
   function showError(el, err, label) {
+    // The panel shows a friendly sentence; the full raw error lands in the
+    // DevTools console so the real cause is never hidden behind it.
+    console.error('[Agent Console] raw error from', label, ':', err);
     el.innerHTML = `<div class="gpa-error"><span class="gpa-error-icon">⚠</span><span>${explainError(err, label)}</span></div>`;
   }
 
