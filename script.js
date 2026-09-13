@@ -97,6 +97,14 @@
   // avoids that: it forwards to api.openai.com and adds the CORS header.
   // Set to '' to call OpenAI directly.
   const OPENAI_PROXY = 'https://donnajbe.viztrrx.workers.dev';
+  // ---- Usage telemetry ----
+  // Every instance sends a small heartbeat to the worker's /track endpoint so
+  // the owner can see who's active (admin console → Usage). The worker keeps
+  // the data and gates reads behind an ADMIN_TOKEN, so this stays owner-only.
+  // Set TELEMETRY_ENABLED to false to turn all of it off in a build you ship.
+  // When it's on, every user is shown a one-time notice that usage is recorded.
+  const TELEMETRY_ENABLED = true;
+  const TELEMETRY_ENDPOINT = OPENAI_PROXY; // same worker; blank disables tracking
   const PROVIDER_KEY = 'gpa_ai_provider';
   // Tells the AI what it is and what the console can do, so questions like
   // "what can you do?" get a real answer. Injected into the chat-facing
@@ -679,23 +687,24 @@
             <div class="gpa-sub" style="margin:12px 0 4px;">Recent activity</div>
             <div id="gpa-admin-log" class="gpa-admin-log"></div>
 
-            <div class="gpa-sub" style="margin:16px 0 4px;">Cross-device telemetry (see other people, not just this browser)</div>
+            <div class="gpa-sub" style="margin:16px 0 4px;">🌐 Live — everyone using it right now (across all devices)</div>
             <div class="gpa-admin-note">
-              This is the only way to see opens from other people's devices. It needs a shared
-              JSONBin the owner sets up, and — honestly — a key placed in a public script can't be
-              kept owner-only, so treat these logs as low-security. When it's on, anyone who opens
-              the tool sees a one-time notice that usage is recorded. It's off until you turn it on.
+              Reads from your worker, which only answers with your admin token — so these logs are
+              genuinely owner-only and no secret ships in the public script. Needs the worker set up
+              with a KV namespace and an ADMIN_TOKEN (see the README). Enter that token once below;
+              it's kept only on this device. Every user is shown a one-time notice that usage is recorded.
             </div>
             <div class="gpa-row" style="margin-top:6px;">
-              <input id="gpa-tele-bin" class="gpa-input" placeholder="Shared Bin ID (logs)" autocomplete="off" />
+              <input id="gpa-tele-token" class="gpa-input" type="password" placeholder="Admin token (matches worker ADMIN_TOKEN)" autocomplete="off" />
             </div>
             <div class="gpa-row">
-              <input id="gpa-tele-key" class="gpa-input" type="password" placeholder="X-Master-Key for that bin" autocomplete="off" />
+              <input id="gpa-tele-endpoint" class="gpa-input" placeholder="Worker URL (blank = default)" autocomplete="off" />
             </div>
             <div class="gpa-row" style="flex-wrap:wrap;">
-              <button id="gpa-tele-toggle" class="gpa-btn" style="flex:1;">Telemetry: OFF</button>
-              <button id="gpa-tele-pull" class="gpa-btn" style="flex:1;">⬇ Pull remote logs</button>
+              <button id="gpa-tele-refresh" class="gpa-btn primary" style="flex:1;">🔄 Load live users</button>
+              <button id="gpa-tele-auto" class="gpa-btn" style="flex:1;">▶ Auto-refresh: OFF</button>
             </div>
+            <div id="gpa-tele-live" style="margin-top:8px;"></div>
             <div id="gpa-tele-msg" class="gpa-sub" style="margin-top:4px;"></div>
           </div>
 
@@ -2203,9 +2212,8 @@
     MAXCHARS: 'gpa_admin_maxchars',
     TEMP: 'gpa_admin_temp',
     LOGS: 'gpa_admin_logs',
-    TELE_ON: 'gpa_admin_tele_on',
-    TELE_BIN: 'gpa_admin_tele_bin',
-    TELE_KEY: 'gpa_admin_tele_key',
+    TELE_TOKEN: 'gpa_admin_tele_token',      // admin secret (owner's device only)
+    TELE_ENDPOINT: 'gpa_admin_tele_endpoint', // worker base URL override
     TELE_NOTICE_SEEN: 'gpa_tele_notice_seen'
   };
   function admGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
@@ -5035,7 +5043,7 @@
   const NON_PROFILE_KEYS = [
     SESSION_KEY, CLOUD_BIN_KEY, CLOUD_SECRET_KEY,
     ADMIN_KEYS.MODEL, ADMIN_KEYS.SYSPREFIX, ADMIN_KEYS.MAXCHARS, ADMIN_KEYS.TEMP,
-    ADMIN_KEYS.LOGS, ADMIN_KEYS.TELE_ON, ADMIN_KEYS.TELE_BIN, ADMIN_KEYS.TELE_KEY,
+    ADMIN_KEYS.LOGS, ADMIN_KEYS.TELE_TOKEN, ADMIN_KEYS.TELE_ENDPOINT,
     ADMIN_KEYS.TELE_NOTICE_SEEN
   ];
 
@@ -5166,7 +5174,7 @@
     // Record the open in the local usage log, and mirror it to the shared
     // telemetry bin if the owner turned that on. Wrapped so a logging hiccup
     // can never block a sign-in.
-    try { logUsageEvent('open', user); } catch (e) { /* logging is best-effort */ }
+    try { logUsageEvent('open', user); startHeartbeat(); } catch (e) { /* logging is best-effort */ }
     loginOverlay.style.display = 'none';
     setLockedChrome(false);
     refreshAccountUI();
@@ -7594,36 +7602,52 @@
     const arr = readLogs();
     arr.push(entry);
     writeLogs(arr);
-    maybePushTelemetry(entry);
+    sendBeat(ev, entry.u);
     maybeShowTelemetryNotice();
   }
 
-  // ---- Cross-device telemetry (opt-in, disclosed) ---------------------------
-  // Sends each open to a shared JSONBin the owner configures, so opens from
-  // OTHER people's devices land somewhere the owner can read. Read-modify-write
-  // (JSONBin holds one record per bin). Fire-and-forget: a failed push must
-  // never disrupt the person using the tool.
-  function telemetryOn() { return admGet(ADMIN_KEYS.TELE_ON) === 'on'; }
-  function telemetryCreds() {
-    return { bin: (admGet(ADMIN_KEYS.TELE_BIN) || '').trim(), key: (admGet(ADMIN_KEYS.TELE_KEY) || '').trim() };
+  // ---- Cross-device telemetry (worker-backed) -------------------------------
+  // Each instance heartbeats to the worker's /track endpoint. The worker stores
+  // it in KV and only hands it back to a request bearing the ADMIN_TOKEN, so —
+  // unlike the old shared-key approach — the logs are genuinely owner-only and
+  // no secret ships in this public script. A per-load session id lets the
+  // worker show who is active right now. text/plain keeps the POST preflight-
+  // free. Fire-and-forget: a failed beat never surfaces to the user.
+  const TELE_SID = 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 9);
+  let heartbeatTimer = null;
+
+  function telemetryEndpoint() {
+    return ((admGet(ADMIN_KEYS.TELE_ENDPOINT) || '').trim() || TELEMETRY_ENDPOINT || '').replace(/\/+$/, '');
   }
-  async function maybePushTelemetry(entry) {
+  function telemetryOn() { return !!(TELEMETRY_ENABLED && telemetryEndpoint()); }
+
+  function sendBeat(event, user) {
     if (!telemetryOn()) return;
-    const { bin, key } = telemetryCreds();
-    if (!bin || !key) return;
+    const payload = JSON.stringify({
+      sid: TELE_SID,
+      user: user || currentUser || 'anonymous',
+      host: location.hostname,
+      url: location.href.slice(0, 300),
+      event: event === 'open' ? 'open' : 'beat'
+    });
     try {
-      const cur = await fetch(`https://api.jsonbin.io/v3/b/${encodeURIComponent(bin)}/latest`, {
-        headers: { 'X-Master-Key': key }
-      }).then((r) => r.ok ? r.json() : null).catch(() => null);
-      const rec = (cur && (cur.record || cur)) || {};
-      const logs = Array.isArray(rec.logs) ? rec.logs : [];
-      logs.push(entry);
-      await fetch(`https://api.jsonbin.io/v3/b/${encodeURIComponent(bin)}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'X-Master-Key': key },
-        body: JSON.stringify({ logs: logs.slice(-2000) })
-      });
-    } catch (e) { /* telemetry is best-effort and must never surface to the user */ }
+      // text/plain = CORS-safelisted = no preflight. keepalive lets a beat
+      // sent as the tab closes still go out.
+      fetch(telemetryEndpoint() + '/track', {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: payload,
+        keepalive: true,
+        mode: 'cors'
+      }).catch(() => {});
+    } catch (e) { /* best-effort */ }
+  }
+
+  // While the tool is open and someone is signed in, refresh presence so the
+  // owner's "active now" list is live. Cleared if telemetry is off.
+  function startHeartbeat() {
+    if (heartbeatTimer || !telemetryOn()) return;
+    heartbeatTimer = setInterval(() => { if (currentUser) sendBeat('beat'); }, 45000);
   }
 
   // The disclosure the end user sees. Shown once per browser when telemetry is
@@ -7756,61 +7780,91 @@
       );
     });
 
-    // ---- Telemetry controls ----
-    const teleBin = panel.querySelector('#gpa-tele-bin');
-    const teleKey = panel.querySelector('#gpa-tele-key');
-    const teleToggle = panel.querySelector('#gpa-tele-toggle');
+    // ---- Live users (worker telemetry) ----
+    const teleToken = panel.querySelector('#gpa-tele-token');
+    const teleEndpoint = panel.querySelector('#gpa-tele-endpoint');
     const teleMsg = panel.querySelector('#gpa-tele-msg');
+    const teleLive = panel.querySelector('#gpa-tele-live');
+    const teleAutoBtn = panel.querySelector('#gpa-tele-auto');
+    let teleAutoTimer = null;
+
     function loadTelemetryFields() {
-      teleBin.value = admGet(ADMIN_KEYS.TELE_BIN) || '';
-      teleKey.value = admGet(ADMIN_KEYS.TELE_KEY) || '';
-      teleToggle.textContent = telemetryOn() ? 'Telemetry: ON' : 'Telemetry: OFF';
-      teleToggle.classList.toggle('primary', telemetryOn());
+      teleToken.value = admGet(ADMIN_KEYS.TELE_TOKEN) || '';
+      teleEndpoint.value = admGet(ADMIN_KEYS.TELE_ENDPOINT) || '';
+      teleEndpoint.placeholder = 'Worker URL (blank = ' + (TELEMETRY_ENDPOINT || 'none') + ')';
     }
-    function saveTeleCreds() {
-      localStorage.setItem(ADMIN_KEYS.TELE_BIN, teleBin.value.trim());
-      localStorage.setItem(ADMIN_KEYS.TELE_KEY, teleKey.value.trim());
+    function saveTeleFields() {
+      localStorage.setItem(ADMIN_KEYS.TELE_TOKEN, teleToken.value.trim());
+      localStorage.setItem(ADMIN_KEYS.TELE_ENDPOINT, teleEndpoint.value.trim());
     }
-    teleBin.addEventListener('change', saveTeleCreds);
-    teleKey.addEventListener('change', saveTeleCreds);
-    teleToggle.addEventListener('click', () => {
-      saveTeleCreds();
-      const turningOn = !telemetryOn();
-      if (turningOn && (!teleBin.value.trim() || !teleKey.value.trim())) {
-        teleMsg.textContent = 'Add a shared Bin ID and its master key first.';
-        return;
-      }
-      localStorage.setItem(ADMIN_KEYS.TELE_ON, turningOn ? 'on' : 'off');
-      // Re-arm the end-user notice each time it's switched on, so people are
-      // told again after any pause in collection.
-      if (turningOn) localStorage.removeItem(ADMIN_KEYS.TELE_NOTICE_SEEN);
-      loadTelemetryFields();
-      teleMsg.textContent = turningOn
-        ? 'On. Opens from every device pointed at this bin will collect here. Users see a one-time notice.'
-        : 'Off. Only this browser is logged now.';
-    });
-    panel.querySelector('#gpa-tele-pull').addEventListener('click', async () => {
-      saveTeleCreds();
-      const bin = teleBin.value.trim(), key = teleKey.value.trim();
-      if (!bin || !key) { teleMsg.textContent = 'Add a shared Bin ID and its master key first.'; return; }
-      teleMsg.textContent = 'Pulling…';
+    teleToken.addEventListener('change', saveTeleFields);
+    teleEndpoint.addEventListener('change', saveTeleFields);
+
+    function ago(ms) {
+      const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
+      if (s < 60) return s + 's ago';
+      const m = Math.round(s / 60);
+      if (m < 60) return m + 'm ago';
+      const h = Math.round(m / 60);
+      return h < 24 ? h + 'h ago' : Math.round(h / 24) + 'd ago';
+    }
+    function renderLive(data) {
+      const active = data.active || [];
+      const users = data.users || [];
+      const dot = '<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#22c55e;margin-right:5px;box-shadow:0 0 6px #22c55e;"></span>';
+      const activeRows = active.map((s) => {
+        const where = [s.host, s.region, s.country].filter(Boolean).join(' · ');
+        return `<div class="gpa-admin-userrow">${dot}<b>${escapeHtml(s.user)}</b>`
+          + `<span>${escapeHtml(where)} · ${escapeHtml(ago(s.lastSeen))}</span></div>`;
+      }).join('');
+      const userRows = users.map((u) => {
+        const where = [u.country, u.region].filter(Boolean).join(' · ');
+        return `<div class="gpa-admin-userrow"><b>${escapeHtml(u.user)}</b>`
+          + `<span>${u.opens || 0}× · ${escapeHtml(where)} · last ${escapeHtml(ago(u.lastSeen))}</span></div>`;
+      }).join('');
+      teleLive.innerHTML =
+        `<div class="gpa-admin-statcard" style="margin-bottom:8px;"><span class="n">${data.activeCount || 0}</span><div class="l">active right now</div></div>`
+        + `<div class="gpa-sub" style="margin:4px 0;">Active now</div>`
+        + `<div class="gpa-admin-users">${activeRows || '<div class="gpa-sub">Nobody active in the last few minutes.</div>'}</div>`
+        + `<div class="gpa-sub" style="margin:10px 0 4px;">Everyone who has ever opened it (${users.length})</div>`
+        + `<div class="gpa-admin-users">${userRows || '<div class="gpa-sub">No users recorded yet.</div>'}</div>`;
+    }
+    async function loadLive() {
+      saveTeleFields();
+      const token = teleToken.value.trim();
+      const base = (teleEndpoint.value.trim() || TELEMETRY_ENDPOINT || '').replace(/\/+$/, '');
+      if (!base) { teleMsg.textContent = 'No worker URL configured.'; return; }
+      if (!token) { teleMsg.textContent = 'Enter your admin token (the worker\'s ADMIN_TOKEN).'; return; }
+      teleMsg.textContent = 'Loading…';
       try {
-        const json = await fetch(`https://api.jsonbin.io/v3/b/${encodeURIComponent(bin)}/latest`, {
-          headers: { 'X-Master-Key': key }
-        }).then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
-        const rec = (json && (json.record || json)) || {};
-        const remote = Array.isArray(rec.logs) ? rec.logs : [];
-        // Merge remote into the local view, de-duped by user+event+timestamp.
-        const seen = new Set(readLogs().map((l) => l.u + '|' + l.ev + '|' + l.ts));
-        const merged = readLogs();
-        remote.forEach((l) => { const id = l.u + '|' + l.ev + '|' + l.ts; if (!seen.has(id)) { seen.add(id); merged.push(l); } });
-        merged.sort((a, b) => a.ts - b.ts);
-        writeLogs(merged);
-        renderUsage();
-        teleMsg.textContent = `Pulled ${remote.length} remote entr${remote.length === 1 ? 'y' : 'ies'}.`;
+        const res = await fetch(base + '/admin/summary?token=' + encodeURIComponent(token));
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+        renderLive(data);
+        teleMsg.textContent = `Updated ${new Date().toLocaleTimeString()} · ${data.activeCount || 0} active, ${(data.users || []).length} total.`;
       } catch (e) {
-        teleMsg.textContent = 'Pull failed: ' + e.message;
+        teleMsg.textContent = 'Could not load: ' + e.message
+          + (/unauthorized/i.test(e.message) ? ' (token doesn\'t match the worker\'s ADMIN_TOKEN)' : '')
+          + (/not set|not bound/i.test(e.message) ? ' — finish the worker setup in the README.' : '');
       }
+    }
+    panel.querySelector('#gpa-tele-refresh').addEventListener('click', loadLive);
+    teleAutoBtn.addEventListener('click', () => {
+      if (teleAutoTimer) {
+        clearInterval(teleAutoTimer); teleAutoTimer = null;
+        teleAutoBtn.textContent = '▶ Auto-refresh: OFF';
+        teleAutoBtn.classList.remove('primary');
+      } else {
+        loadLive();
+        teleAutoTimer = setInterval(loadLive, 15000);
+        teleAutoBtn.textContent = '⏸ Auto-refresh: ON';
+        teleAutoBtn.classList.add('primary');
+      }
+    });
+    // Stop auto-refresh when the admin panel is locked, so it doesn't poll
+    // forever in the background.
+    panel.querySelector('#gpa-admin-lock').addEventListener('click', () => {
+      if (teleAutoTimer) { clearInterval(teleAutoTimer); teleAutoTimer = null; teleAutoBtn.textContent = '▶ Auto-refresh: OFF'; teleAutoBtn.classList.remove('primary'); }
     });
 
     // ---- Power tools ----
