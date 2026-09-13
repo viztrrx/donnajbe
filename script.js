@@ -92,6 +92,11 @@
   const STORAGE_KEY = 'gpa_gemini_api_key';
   const OPENAI_STORAGE_KEY = 'gpa_openai_api_key';
   const OPENAI_MODEL = 'gpt-4o-mini';
+  // Browser→OpenAI calls can be blocked by ad blockers, antivirus shields or
+  // network filters (they look like CORS errors). Routing through this proxy
+  // avoids that: it forwards to api.openai.com and adds the CORS header.
+  // Set to '' to call OpenAI directly.
+  const OPENAI_PROXY = 'https://donnajbe.viztrrx.workers.dev';
   const PROVIDER_KEY = 'gpa_ai_provider';
   const SPEED_KEY = 'gpa_type_speed';
   const FONT_KEY = 'gpa_response_font';
@@ -1873,7 +1878,7 @@
     if (systemText) messages.push({ role: 'system', content: systemText });
     messages.push({ role: 'user', content });
 
-    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    const res = await fetch(`${OPENAI_PROXY || 'https://api.openai.com'}/v1/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
