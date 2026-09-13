@@ -275,6 +275,7 @@
           <button class="gpa-dropdown-item" data-tab="music">Music</button>
           <button class="gpa-dropdown-item" data-tab="browser">Browser</button>
           <button class="gpa-dropdown-item" data-tab="games">Games</button>
+          <button class="gpa-dropdown-item" data-tab="study">Study</button>
           <button class="gpa-dropdown-item" data-tab="saved">Saved</button>
           <button class="gpa-dropdown-item" data-tab="theme">Settings</button>
         </div>
@@ -287,6 +288,18 @@
         <div class="gpa-row">
           <button id="gpa-scan-btn" class="gpa-btn">Scan page text</button>
           <button id="gpa-capture-btn" class="gpa-btn">Capture screen</button>
+        </div>
+        <div class="gpa-row">
+          <button id="gpa-tables-btn" class="gpa-btn">📋 Extract tables</button>
+          <button id="gpa-watch-btn" class="gpa-btn">👀 Watch page</button>
+        </div>
+        <div class="gpa-row" id="gpa-watch-row" style="display:none;">
+          <input id="gpa-watch-cond" class="gpa-input" placeholder='Tell me when… (e.g. "price drops below $50")' />
+          <button id="gpa-watch-start" class="gpa-btn primary">Arm</button>
+        </div>
+        <div class="gpa-row">
+          <input id="gpa-cmd-input" class="gpa-input" placeholder='⚡ Tell the page what to do… ("click the third assignment")' />
+          <button id="gpa-cmd-btn" class="gpa-btn primary">Do it</button>
         </div>
         <div class="gpa-row">
           <button id="gpa-upload-btn" class="gpa-btn">Upload image</button>
@@ -318,6 +331,7 @@
         <div class="gpa-row">
           <input id="gpa-ask-input" class="gpa-input" placeholder="Ask me anything…" />
           <button id="gpa-ask-btn" class="gpa-btn primary">Send</button>
+          <button id="gpa-voice-btn" class="gpa-btn" title="Speak your question">🎙</button>
         </div>
       </div>
 
@@ -369,6 +383,12 @@
         </div>
         <div class="gpa-sub" style="margin-bottom:8px;">Sites that block embedding (banks, most social apps, soundcloud.com itself) won't load here — that's a security setting on their end which this doesn't try to bypass. Use the Music tab for actual SoundCloud playback.</div>
         <iframe id="gpa-browser-frame" class="gpa-iframe" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"></iframe>
+        <div class="gpa-sub" style="margin:12px 0 6px;">🔎 Research mode — AI reads web sources and writes you a brief</div>
+        <div class="gpa-row">
+          <input id="gpa-research-input" class="gpa-input" placeholder="Topic or question to research…" />
+          <button id="gpa-research-btn" class="gpa-btn primary">Research</button>
+        </div>
+        <div id="gpa-research-out" class="gpa-output" style="max-height:200px;"></div>
       </div>
 
       <div class="gpa-pane" data-pane="games">
@@ -420,6 +440,28 @@
       <div class="gpa-pane" data-pane="saved">
         <div class="gpa-sub" style="margin-bottom:8px;">Your Saved Insights</div>
         <div id="gpa-saved-list" class="gpa-chat"></div>
+        <div class="gpa-sub" style="margin:12px 0 6px;">📝 Scratchpad — autosaved to your profile</div>
+        <textarea id="gpa-scratch" class="gpa-sync-box" style="height:90px;" placeholder="Jot anything… it saves as you type."></textarea>
+        <div class="gpa-row" style="margin-top:6px;">
+          <button id="gpa-scratch-tidy" class="gpa-btn">✨ Tidy notes with AI</button>
+        </div>
+        <div class="gpa-sub" style="margin:12px 0 6px;">🍅 Pomodoro — 25 min focus / 5 min break</div>
+        <div class="gpa-row" style="justify-content:center;">
+          <span id="gpa-pomo-time" class="gpa-pomo-time">25:00</span>
+        </div>
+        <div class="gpa-row" style="justify-content:center;">
+          <button id="gpa-pomo-start" class="gpa-btn primary">▶ Start</button>
+          <button id="gpa-pomo-reset" class="gpa-btn">Reset</button>
+          <span id="gpa-pomo-count" class="gpa-sub"></span>
+        </div>
+      </div>
+
+      <div class="gpa-pane" data-pane="study">
+        <div class="gpa-row">
+          <button id="gpa-fc-gen" class="gpa-btn primary">✨ Make flashcards from this page</button>
+        </div>
+        <div id="gpa-fc-status" class="gpa-sub" style="margin-bottom:6px;">Open a page with material on it, then generate a deck. Cards you "knew" three times are retired until you reset.</div>
+        <div id="gpa-fc-study"></div>
       </div>
 
       <div class="gpa-pane" data-pane="theme">
@@ -464,6 +506,10 @@
         <div class="gpa-row">
           <button class="gpa-btn provider-btn primary" data-provider="gemini">Gemini</button>
           <button class="gpa-btn provider-btn" data-provider="openai">OpenAI</button>
+        </div>
+        <div class="gpa-sub" style="margin:14px 0 6px;">Voice</div>
+        <div class="gpa-row">
+          <button id="gpa-tts-toggle" class="gpa-btn">🔇 Read answers aloud: OFF</button>
         </div>
         <div class="gpa-sub" style="margin:14px 0 6px;">Typing animation speed</div>
         <div class="gpa-row">
@@ -1282,6 +1328,21 @@
         background: ${t.sub};
       }
       .gpa-body::-webkit-scrollbar-corner { background: transparent; }
+
+      /* ---- Extended tools ---- */
+      .gpa-sel-bubble { position: fixed; z-index: 2147483647; display: flex; gap: 2px; padding: 4px; border-radius: 10px; background: ${t.panel}; border: 1px solid ${t.accent}; box-shadow: 0 6px 24px rgba(0,0,0,0.45); }
+      .gpa-sel-bubble button { background: transparent; border: none; color: ${t.text}; font-size: 11px; padding: 4px 7px; border-radius: 6px; cursor: pointer; white-space: nowrap; font-family: inherit; }
+      .gpa-sel-bubble button:hover { background: ${t.accent}33; }
+      .gpa-sel-pop { position: fixed; z-index: 2147483647; max-width: 340px; max-height: 260px; overflow: auto; padding: 10px 12px; border-radius: 10px; background: ${t.panel}; border: 1px solid ${t.accent}; color: ${t.text}; font-size: 12px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: break-word; box-shadow: 0 8px 28px rgba(0,0,0,0.5); }
+      .gpa-sel-pop .gpa-sel-pop-src { display: block; margin-top: 8px; font-size: 10px; opacity: 0.65; overflow-wrap: break-word; }
+      .gpa-flip { perspective: 900px; cursor: pointer; min-height: 96px; }
+      .gpa-flip-inner { position: relative; transition: transform 0.35s; transform-style: preserve-3d; min-height: 96px; }
+      .gpa-flip.flipped .gpa-flip-inner { transform: rotateY(180deg); }
+      .gpa-flip-face { position: absolute; inset: 0; backface-visibility: hidden; -webkit-backface-visibility: hidden; display: flex; align-items: center; justify-content: center; text-align: center; padding: 12px; border-radius: 10px; border: 1px solid ${t.border}; background: ${t.field}; color: ${t.text}; font-size: 12.5px; line-height: 1.5; overflow: auto; }
+      .gpa-flip-back { transform: rotateY(180deg); background: ${t.accent}1f; border-color: ${t.accent}; }
+      .gpa-pomo-time { font-size: 22px; font-weight: 700; letter-spacing: 2px; font-family: 'JetBrains Mono', ui-monospace, monospace; }
+      .gpa-flash-once { animation: gpa-flash 1.2s ease-in-out 3; }
+      @keyframes gpa-flash { 0%, 100% { outline: none; } 50% { outline: 3px solid ${t.accent}; outline-offset: 2px; } }
     `;
     if (typeof applyMiniColorMode === 'function') applyMiniColorMode();
   }
@@ -1426,6 +1487,7 @@
       dropdown.classList.remove('open');
       if (item.dataset.tab !== 'games') stopActiveGame();
       if (item.dataset.tab === 'saved') renderSavedInsights();
+      if (item.dataset.tab === 'study') renderDeck();
       // A hidden pane measures as zero, so games can only be sized once
       // the tab is actually visible.
       else requestAnimationFrame(() => { if (typeof fitGameToStage === 'function') fitGameToStage(); });
@@ -2232,6 +2294,18 @@
       const out = await callAI(userText, sys);
       const mapping = JSON.parse(out);
 
+      // Show what the AI intends to fill before touching the form — fill
+      // only on confirm. Mock values only; nothing is submitted.
+      const preview = mapping.map((item) => {
+        const el = inputs[item.id];
+        const field = el ? (el.name || el.placeholder || item.id) : item.id;
+        return `  ${field} → ${item.v}`;
+      }).join('\n');
+      if (!confirm(`The AI suggests filling ${mapping.length} field(s):\n\n${preview.slice(0, 900)}\n\nFill them in?\n(Nothing is submitted — you can still edit or clear everything.)`)) {
+        scanOutput.textContent = 'Cancelled — no fields were filled.';
+        return;
+      }
+
       mapping.forEach((item) => {
         const el = inputs[item.id];
         if (el) {
@@ -2787,13 +2861,543 @@
       const sys = 'You are a helpful, concise assistant. Reply in plain conversational sentences only — no markdown formatting (no asterisks, headers, or lists) since this is shown as plain text. Keep answers as short as possible while still being useful. Then, on its own final line, write exactly "CONFIDENCE: NN" where NN (0-100) is your confidence that the answer is accurate.';
       const out = await callAI(q, sys);
       const { text: cleanText, confidence } = extractConfidenceLine(out);
-      typeText(thinking, cleanText, chatEl, () => appendConfidenceBadge(thinking, confidence));
+      typeText(thinking, cleanText, chatEl, () => { appendConfidenceBadge(thinking, confidence); speak(cleanText); });
     } catch (e) {
       showError(thinking, e, currentProviderLabel());
     }
   }
   askBtn.addEventListener('click', sendChat);
   askInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendChat(); });
+
+  // ---- Extended tools -------------------------------------------------------
+  // Voice input, read-aloud, text-selection assistant, table extractor, page
+  // watcher, natural-language page commands, flashcards, scratchpad, pomodoro
+  // and research mode. All persistent state uses gpa_* localStorage keys, so
+  // profiles and cloud sync pick them up automatically (collectState grabs
+  // every gpa_* key).
+
+  const TTS_KEY = 'gpa_tts_enabled';
+  const SCRATCH_KEY = 'gpa_scratchpad';
+  const FC_KEY = 'gpa_flashcards';
+
+  function stripConfidence(text) {
+    return String(text || '').replace(/\n?\s*CONFIDENCE:\s*\d{1,3}\s*%?\s*$/i, '').trim();
+  }
+
+  // Read-aloud (browser speech synthesis — free, local, no key needed).
+  function speak(text) {
+    if (localStorage.getItem(TTS_KEY) !== 'on' || !('speechSynthesis' in window) || !text) return;
+    try {
+      speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(text.slice(0, 4000));
+      u.rate = 1.05;
+      speechSynthesis.speak(u);
+    } catch (e) { /* speech is a nice-to-have — never let it break a reply */ }
+  }
+
+  const ttsBtn = panel.querySelector('#gpa-tts-toggle');
+  function renderTtsBtn() {
+    const on = localStorage.getItem(TTS_KEY) === 'on';
+    ttsBtn.textContent = on ? '🔊 Read answers aloud: ON' : '🔇 Read answers aloud: OFF';
+    ttsBtn.classList.toggle('primary', on);
+  }
+  ttsBtn.addEventListener('click', () => {
+    const on = localStorage.getItem(TTS_KEY) !== 'on';
+    localStorage.setItem(TTS_KEY, on ? 'on' : 'off');
+    if (!on && 'speechSynthesis' in window) speechSynthesis.cancel();
+    renderTtsBtn();
+  });
+  renderTtsBtn();
+
+  // Voice input for Ask AI (browser speech recognition).
+  (function voiceInput() {
+    const voiceBtn = panel.querySelector('#gpa-voice-btn');
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) {
+      voiceBtn.title = 'Speech recognition not supported in this browser';
+      voiceBtn.disabled = true;
+      return;
+    }
+    let rec = null, listening = false;
+    voiceBtn.addEventListener('click', () => {
+      if (listening) { rec.stop(); return; }
+      rec = new SR();
+      rec.lang = 'en-US';
+      rec.maxAlternatives = 1;
+      rec.onresult = (e) => {
+        askInput.value = e.results[0][0].transcript;
+        sendChat();
+      };
+      const done = () => { listening = false; voiceBtn.classList.remove('primary'); voiceBtn.textContent = '🎙'; };
+      rec.onend = done;
+      rec.onerror = done;
+      listening = true;
+      voiceBtn.classList.add('primary');
+      voiceBtn.textContent = '🔴';
+      rec.start();
+    });
+  })();
+
+  // Text-selection assistant: select any text on the page → floating bubble
+  // with Explain / Simplify / Translate / Define / clean-copy / save.
+  (function selectionAssistant() {
+    const ACTIONS = [
+      ['Explain', 'Explain the selected text clearly and concisely.'],
+      ['Simplify', 'Rewrite the selected text in much simpler words anyone can understand. Keep it short.'],
+      ['Translate', 'Translate the selected text to English. If it is already in English, translate it to Spanish.'],
+      ['Define', 'Define the key terms, jargon, or names in the selected text — one per line, term first.'],
+      ['📋 Clean', null],
+      ['💾', 'save']
+    ];
+    let bubble = null, pop = null;
+
+    function removeBubble() { if (bubble) { bubble.remove(); bubble = null; } }
+    function removePop() { if (pop) { pop.remove(); pop = null; } }
+
+    function showPop(x, y, selectedText, sys) {
+      removePop();
+      pop = document.createElement('div');
+      pop.className = 'gpa-sel-pop';
+      pop.textContent = 'Thinking…';
+      pop.style.left = Math.max(8, Math.min(x, window.innerWidth - 356)) + 'px';
+      pop.style.top = Math.max(8, Math.min(y + 14, window.innerHeight - 280)) + 'px';
+      document.body.appendChild(pop);
+      callAI(`Selected text:\n"""\n${selectedText}\n"""`, sys)
+        .then((out) => {
+          pop.textContent = stripConfidence(out);
+          speak(out);
+          const src = document.createElement('span');
+          src.className = 'gpa-sel-pop-src';
+          src.textContent = selectedText.slice(0, 120) + (selectedText.length > 120 ? '…' : '');
+          pop.appendChild(src);
+        })
+        .catch((e) => { pop.textContent = 'AI error: ' + (e && e.message || e); });
+      pop.addEventListener('click', removePop);
+    }
+
+    document.addEventListener('mouseup', (e) => {
+      if (e.target.closest && (e.target.closest('#gpa-root-host') || e.target.closest('.gpa-sel-bubble') || e.target.closest('.gpa-sel-pop'))) return;
+      setTimeout(() => {
+        const sel = window.getSelection();
+        const text = sel ? String(sel).trim() : '';
+        if (!text || text.length < 2 || !sel.rangeCount || sel.isCollapsed) { removeBubble(); return; }
+        removeBubble();
+        const rect = sel.getRangeAt(0).getBoundingClientRect();
+        if (!rect.width && !rect.height) return;
+        bubble = document.createElement('div');
+        bubble.className = 'gpa-sel-bubble';
+        ACTIONS.forEach(([label, sys]) => {
+          const b = document.createElement('button');
+          b.textContent = label;
+          b.addEventListener('mousedown', (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            if (sys === null) {
+              navigator.clipboard.writeText(text.replace(/\s+/g, ' ').trim()).then(() => {
+                b.textContent = '✓ Copied';
+                setTimeout(removeBubble, 600);
+              });
+            } else if (sys === 'save') {
+              saveInsight(text);
+              removeBubble();
+            } else {
+              showPop(rect.left, rect.bottom, text, sys + ' Reply in plain text only — no markdown symbols.');
+            }
+          });
+          bubble.appendChild(b);
+        });
+        document.body.appendChild(bubble);
+        bubble.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - bubble.offsetWidth - 12)) + 'px';
+        bubble.style.top = Math.max(8, rect.top - bubble.offsetHeight - 6) + 'px';
+      }, 10);
+    });
+    window.addEventListener('scroll', removeBubble, true);
+    window.addEventListener('keydown', (e) => { if (e.key === 'Escape') { removeBubble(); removePop(); } });
+  })();
+
+  // Table extractor: list every table on the page with CSV copy + Ask AI.
+  panel.querySelector('#gpa-tables-btn').addEventListener('click', () => {
+    const tables = Array.from(document.querySelectorAll('table')).filter((t) => t.rows.length > 1);
+    if (!tables.length) { scanOutput.textContent = 'No tables found on this page.'; return; }
+    scanOutput.innerHTML = '';
+    const head = document.createElement('div');
+    head.className = 'gpa-sub';
+    head.textContent = `Found ${tables.length} table${tables.length > 1 ? 's' : ''}:`;
+    scanOutput.appendChild(head);
+    tables.slice(0, 10).forEach((tb, i) => {
+      const rows = Array.from(tb.rows).map((tr) => Array.from(tr.cells).map((td) => (td.innerText || '').trim().replace(/\s+/g, ' ')));
+      if (!rows[0].length) return;
+      const csv = rows.map((r) => r.map((c) => (/[",\n]/.test(c) ? '"' + c.replace(/"/g, '""') + '"' : c)).join(',')).join('\n');
+      const div = document.createElement('div');
+      div.className = 'gpa-msg ai';
+      const label = document.createElement('div');
+      label.textContent = `Table ${i + 1} — ${rows.length} rows × ${rows[0].length} cols`;
+      label.style.fontWeight = '700';
+      label.style.marginBottom = '4px';
+      div.appendChild(label);
+      const row = document.createElement('div');
+      row.className = 'gpa-row';
+      const cp = document.createElement('button');
+      cp.className = 'gpa-btn';
+      cp.textContent = '📋 Copy CSV';
+      cp.addEventListener('click', () => navigator.clipboard.writeText(csv).then(() => {
+        cp.textContent = '✓ Copied';
+        setTimeout(() => { cp.textContent = '📋 Copy CSV'; }, 900);
+      }));
+      const ask = document.createElement('button');
+      ask.className = 'gpa-btn primary';
+      ask.textContent = '🤖 Ask AI about it';
+      ask.addEventListener('click', async () => {
+        ask.disabled = true;
+        ask.textContent = 'Thinking…';
+        try {
+          const out = await callAI(`Here is a table as CSV:\n${csv.slice(0, 8000)}\n\nSummarize the key takeaways in a few short plain-text lines.`, 'You are a concise data analyst. Plain text only.');
+          const res = document.createElement('div');
+          res.className = 'gpa-msg ai';
+          res.style.marginTop = '6px';
+          div.appendChild(res);
+          typeText(res, stripConfidence(out), scanOutput, () => addSaveButton(res, stripConfidence(out)));
+        } catch (e) {
+          showError(div, e, currentProviderLabel());
+        }
+        ask.disabled = false;
+        ask.textContent = '🤖 Ask AI about it';
+      });
+      row.appendChild(cp);
+      row.appendChild(ask);
+      div.appendChild(row);
+      scanOutput.appendChild(div);
+    });
+  });
+
+  // Page watcher: poll the page text every 30s and let the AI judge whether
+  // the user's condition has been met. In-memory only (a reload ends it) —
+  // the condition is remembered so it's one click to re-arm.
+  (function pageWatcher() {
+    const watch = { timer: null, last: '', cond: '' };
+    const watchBtn = panel.querySelector('#gpa-watch-btn');
+    const watchRow = panel.querySelector('#gpa-watch-row');
+    const watchCond = panel.querySelector('#gpa-watch-cond');
+    watchCond.value = localStorage.getItem('gpa_watch_last_cond') || '';
+
+    function setUi(watching) {
+      watchBtn.textContent = watching ? '⏹ Stop watching' : '👀 Watch page';
+      watchBtn.classList.toggle('primary', watching);
+    }
+    function stop(msg) {
+      if (watch.timer) { clearInterval(watch.timer); watch.timer = null; }
+      setUi(false);
+      if (msg) scanOutput.textContent = msg;
+    }
+    watchBtn.addEventListener('click', () => {
+      if (watch.timer) { stop('Stopped watching.'); return; }
+      watchRow.style.display = watchRow.style.display === 'none' ? 'flex' : 'none';
+    });
+    panel.querySelector('#gpa-watch-start').addEventListener('click', () => {
+      const cond = watchCond.value.trim();
+      if (!cond) { scanOutput.textContent = 'Type what you want to watch for first.'; return; }
+      watch.cond = cond;
+      watch.last = extractPageText();
+      localStorage.setItem('gpa_watch_last_cond', cond);
+      if (window.Notification && Notification.permission === 'default') {
+        try { Notification.requestPermission(); } catch (e) { /* optional */ }
+      }
+      scanOutput.textContent = `👀 Watching every 30s for: "${cond}". Keep this tab open — reloading the page ends the watch.`;
+      setUi(true);
+      watch.timer = setInterval(check, 30000);
+    });
+    async function check() {
+      try {
+        const now = extractPageText();
+        if (now === watch.last) return;
+        watch.last = now;
+        const sys = 'You are a page-change monitor. Answer with exactly one line: either "YES: <one short sentence>" or just "NO".';
+        const out = await callAI(`The user is watching a page for this condition: "${watch.cond}"\n\nCURRENT PAGE TEXT (truncated):\n${now.slice(0, 9000)}\n\nDoes the page now satisfy the condition?`, sys);
+        if (/^YES/i.test(out.trim())) {
+          const why = out.replace(/^YES:\s*/i, '').trim();
+          stop(`🔔 ${why}`);
+          speak('Watch triggered. ' + why);
+          try { if (window.Notification && Notification.permission === 'granted') new Notification('Agent Console', { body: why }); } catch (e) { /* optional */ }
+        }
+      } catch (e) { /* transient errors: keep watching */ }
+    }
+    setUi(false);
+  })();
+
+  // Natural-language page commands: AI maps the request to a concrete action.
+  panel.querySelector('#gpa-cmd-btn').addEventListener('click', async () => {
+    const cmdInput = panel.querySelector('#gpa-cmd-input');
+    const cmd = cmdInput.value.trim();
+    if (!cmd) return;
+    scanOutput.textContent = '⚡ Working out what to do…';
+    try {
+      const sys = 'You convert user commands into page actions. Available actions: click (an element whose visible text matches), scroll (scroll to the first element containing the text), highlight (mark the text on the page). Respond ONLY with JSON: {"action":"click|scroll|highlight","target":"exact visible text to find"}. If impossible, respond {"action":"none"}.';
+      const out = await callAI(`Command: ${cmd}\n\nPage text (truncated):\n${extractPageText().slice(0, 6000)}`, sys);
+      const m = out.match(/\{[\s\S]*\}/);
+      const plan = m ? JSON.parse(m[0]) : { action: 'none' };
+      if (!plan.action || plan.action === 'none' || !plan.target) {
+        scanOutput.textContent = "Couldn't map that to a page action — try naming the exact link or button text.";
+        return;
+      }
+      const target = normalizeForMatch(String(plan.target));
+      const candidates = Array.from(document.querySelectorAll('a,button,[role="button"],input[type="submit"],input[type="button"],li,td,th,h1,h2,h3,h4,p,span,div,label')).filter((el) => {
+        if (el.closest('#gpa-root-host')) return false;
+        const t = normalizeForMatch(el.innerText || el.value || '');
+        if (!t || !t.includes(target)) return false;
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+      });
+      if (!candidates.length) {
+        scanOutput.textContent = `Nothing on the page matches "${plan.target}".`;
+        return;
+      }
+      candidates.sort((a, b) => normalizeForMatch(a.innerText || a.value || '').length - normalizeForMatch(b.innerText || b.value || '').length);
+      const el = candidates[0];
+      if (plan.action === 'click') {
+        if (!confirm(`About to click: "${(el.innerText || el.value || '').trim().slice(0, 120)}"\n\nProceed?`)) {
+          scanOutput.textContent = 'Cancelled — nothing was clicked.';
+          return;
+        }
+        el.click();
+        scanOutput.textContent = `⚡ Clicked: ${(el.innerText || el.value || '').trim().slice(0, 80)}`;
+      } else if (plan.action === 'highlight') {
+        const ok = highlightSnippetOnPage(String(plan.target));
+        scanOutput.textContent = ok ? '⚡ Highlighted on the page.' : `Couldn't find "${plan.target}" to highlight.`;
+      } else {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.classList.add('gpa-flash-once');
+        setTimeout(() => el.classList.remove('gpa-flash-once'), 4000);
+        scanOutput.textContent = `⚡ Scrolled to: ${(el.innerText || el.value || '').trim().slice(0, 80)}`;
+      }
+      cmdInput.value = '';
+    } catch (e) {
+      showError(scanOutput, e, currentProviderLabel());
+    }
+  });
+
+  // Flashcards (Study tab): generate a deck from the page, spaced-ish
+  // repetition via a simple 3-box ladder — "knew it" moves a card up, three
+  // boxes retires it; "again" sends it back to box 1.
+  function renderDeck() {
+    const fcStudy = panel.querySelector('#gpa-fc-study');
+    const fcStatus = panel.querySelector('#gpa-fc-status');
+    if (!fcStudy) return;
+    const cards = JSON.parse(localStorage.getItem(FC_KEY) || '[]');
+    fcStudy.innerHTML = '';
+    if (!cards.length) {
+      fcStudy.innerHTML = '<div class="gpa-sub">No deck yet. Find a page with material on it, then press "Make flashcards".</div>';
+      return;
+    }
+    const mastered = cards.filter((c) => c.box >= 3).length;
+    const head = document.createElement('div');
+    head.className = 'gpa-row';
+    head.style.justifyContent = 'space-between';
+    const prog = document.createElement('span');
+    prog.className = 'gpa-sub';
+    prog.textContent = `${mastered}/${cards.length} mastered`;
+    const ctrls = document.createElement('div');
+    const reset = document.createElement('button');
+    reset.className = 'gpa-btn';
+    reset.textContent = '🔄 Reset progress';
+    reset.addEventListener('click', () => {
+      const c = JSON.parse(localStorage.getItem(FC_KEY) || '[]');
+      c.forEach((x) => { x.box = 1; });
+      localStorage.setItem(FC_KEY, JSON.stringify(c));
+      renderDeck();
+    });
+    const del = document.createElement('button');
+    del.className = 'gpa-btn';
+    del.textContent = '🗑 Delete deck';
+    del.addEventListener('click', () => {
+      if (confirm('Delete the whole deck?')) { localStorage.removeItem(FC_KEY); renderDeck(); }
+    });
+    ctrls.appendChild(reset);
+    ctrls.appendChild(del);
+    head.appendChild(prog);
+    head.appendChild(ctrls);
+    fcStudy.appendChild(head);
+
+    const due = cards.map((c, i) => ({ c, i })).filter((x) => x.c.box < 3);
+    if (!due.length) {
+      const done = document.createElement('div');
+      done.className = 'gpa-sub';
+      done.style.marginTop = '10px';
+      done.textContent = '🎉 Deck mastered! Reset progress to study it again.';
+      fcStudy.appendChild(done);
+      return;
+    }
+    const pick = due[Math.floor(Math.random() * due.length)];
+    const flip = document.createElement('div');
+    flip.className = 'gpa-flip';
+    flip.innerHTML = `<div class="gpa-flip-inner"><div class="gpa-flip-face">${escapeHtml(pick.c.q)}</div><div class="gpa-flip-face gpa-flip-back">${escapeHtml(pick.c.a)}</div></div>`;
+    flip.addEventListener('click', () => flip.classList.toggle('flipped'));
+    fcStudy.appendChild(flip);
+    const hint = document.createElement('div');
+    hint.className = 'gpa-sub';
+    hint.style.textAlign = 'center';
+    hint.style.marginTop = '4px';
+    hint.textContent = 'Tap the card to flip it';
+    fcStudy.appendChild(hint);
+    const row = document.createElement('div');
+    row.className = 'gpa-row';
+    row.style.marginTop = '6px';
+    const again = document.createElement('button');
+    again.className = 'gpa-btn';
+    again.textContent = '🔁 Again';
+    const know = document.createElement('button');
+    know.className = 'gpa-btn primary';
+    know.textContent = '✓ Knew it';
+    function grade(box) {
+      const c = JSON.parse(localStorage.getItem(FC_KEY) || '[]');
+      c[pick.i].box = box === 3 ? Math.min(3, (c[pick.i].box || 1) + 1) : 1;
+      localStorage.setItem(FC_KEY, JSON.stringify(c));
+      renderDeck();
+    }
+    again.addEventListener('click', () => grade(1));
+    know.addEventListener('click', () => grade(3));
+    row.appendChild(again);
+    row.appendChild(know);
+    fcStudy.appendChild(row);
+  }
+
+  panel.querySelector('#gpa-fc-gen').addEventListener('click', async () => {
+    const fcStatus = panel.querySelector('#gpa-fc-status');
+    const fcStudy = panel.querySelector('#gpa-fc-study');
+    const text = extractPageText().slice(0, 12000);
+    if (text.trim().length < 80) { fcStatus.textContent = 'Not enough page text here to build cards — open a page with real content first.'; return; }
+    fcStatus.textContent = '✨ Building your deck…';
+    try {
+      const sys = 'Create flashcards from the provided material. Return ONLY a JSON array of 8-15 objects: [{"q":"question","a":"short answer"}]. Cover the most important facts and concepts. No text outside the JSON array.';
+      const out = await callAI(`MATERIAL:\n${text}`, sys);
+      const m = out.match(/\[[\s\S]*\]/);
+      const cards = JSON.parse(m[0]).map((c) => ({ q: String(c.q), a: String(c.a), box: 1 }));
+      localStorage.setItem(FC_KEY, JSON.stringify(cards));
+      fcStatus.textContent = `Deck created with ${cards.length} cards. Tap a card to flip it.`;
+      renderDeck();
+    } catch (e) {
+      fcStatus.textContent = '';
+      showError(fcStudy, e, currentProviderLabel());
+    }
+  });
+
+  // Scratchpad (Saved tab): autosaved textarea + AI tidier.
+  (function scratchpad() {
+    const scratch = panel.querySelector('#gpa-scratch');
+    const tidyBtn = panel.querySelector('#gpa-scratch-tidy');
+    scratch.value = localStorage.getItem(SCRATCH_KEY) || '';
+    let t = null;
+    scratch.addEventListener('input', () => {
+      clearTimeout(t);
+      t = setTimeout(() => localStorage.setItem(SCRATCH_KEY, scratch.value), 300);
+    });
+    tidyBtn.addEventListener('click', async () => {
+      const raw = scratch.value.trim();
+      if (!raw) return;
+      tidyBtn.disabled = true;
+      tidyBtn.textContent = 'Tidying…';
+      try {
+        const out = await callAI(`Here are my raw notes. Rewrite them as a clean, organized plain-text list: group related items under short headings, fix typos, remove repetition. Keep every fact — do not invent new ones.\n\nNOTES:\n${raw.slice(0, 8000)}`, 'You are a tidy note-taker. Plain text only, no markdown symbols.');
+        if (confirm('Replace your scratchpad with the tidied version?\n\n(OK = replace · Cancel = keep your notes)')) {
+          scratch.value = stripConfidence(out);
+          localStorage.setItem(SCRATCH_KEY, scratch.value);
+        }
+      } catch (e) {
+        alert('AI error: ' + (e && e.message || e));
+      }
+      tidyBtn.disabled = false;
+      tidyBtn.textContent = '✨ Tidy notes with AI';
+    });
+  })();
+
+  // Pomodoro (Saved tab): 25/5 cycles, count persisted to the profile.
+  (function pomodoro() {
+    let left = 25 * 60, running = null, mode = 'focus';
+    let cycles = parseInt(localStorage.getItem('gpa_pomo_cycles') || '0', 10) || 0;
+    const timeEl = panel.querySelector('#gpa-pomo-time');
+    const startBtn = panel.querySelector('#gpa-pomo-start');
+    const countEl = panel.querySelector('#gpa-pomo-count');
+    function render() {
+      const m = String(Math.floor(left / 60)).padStart(2, '0');
+      const s = String(left % 60).padStart(2, '0');
+      timeEl.textContent = `${m}:${s}`;
+      countEl.textContent = cycles ? `🍅 ${cycles} done` : '';
+    }
+    function stopTicking() {
+      if (running) { clearInterval(running); running = null; }
+      startBtn.textContent = '▶ Start';
+    }
+    function tick() {
+      left--;
+      if (left <= 0) {
+        stopTicking();
+        if (mode === 'focus') {
+          cycles++;
+          localStorage.setItem('gpa_pomo_cycles', String(cycles));
+          mode = 'break';
+          left = 5 * 60;
+          speak('Focus session done. Take a five minute break.');
+        } else {
+          mode = 'focus';
+          left = 25 * 60;
+          speak('Break is over. Back to focus.');
+        }
+      }
+      render();
+    }
+    startBtn.addEventListener('click', () => {
+      if (running) { stopTicking(); return; }
+      running = setInterval(tick, 1000);
+      startBtn.textContent = '⏸ Pause';
+    });
+    panel.querySelector('#gpa-pomo-reset').addEventListener('click', () => {
+      stopTicking();
+      mode = 'focus';
+      left = 25 * 60;
+      render();
+    });
+    render();
+  })();
+
+  // Research mode (Browser tab): the AI picks 3 authoritative sources, the
+  // worker fetches them (pages block browser-side fetches with CORS), and
+  // the AI writes a brief with sources. Needs OPENAI_PROXY to be set.
+  panel.querySelector('#gpa-research-btn').addEventListener('click', async () => {
+    const q = panel.querySelector('#gpa-research-input').value.trim();
+    const out = panel.querySelector('#gpa-research-out');
+    if (!q) { out.textContent = 'Type a topic or question first.'; return; }
+    if (!OPENAI_PROXY) { out.textContent = 'Research mode needs the worker proxy (OPENAI_PROXY) to fetch pages.'; return; }
+    out.textContent = '🔎 Planning sources…';
+    try {
+      const planOut = await callAI(`I need to research: "${q}". Suggest 3 specific, authoritative web page URLs (direct articles or docs, not search result pages) that would contain good information about it. Respond ONLY with a JSON array of 3 URL strings.`, 'You are a research librarian.');
+      const urls = JSON.parse(planOut.match(/\[[\s\S]*\]/)[0]).slice(0, 3);
+      const srcs = [];
+      for (const u of urls) {
+        out.textContent = `🔎 Reading ${srcs.length + 1}/${urls.length}: ${u.slice(0, 60)}…`;
+        try {
+          const r = await fetch(`${OPENAI_PROXY}/read?url=${encodeURIComponent(u)}`);
+          if (!r.ok) continue;
+          const html = await r.text();
+          const doc = new DOMParser().parseFromString(html, 'text/html');
+          doc.querySelectorAll('script,style,noscript,svg,nav,footer,header').forEach((el) => el.remove());
+          const txt = (doc.body.innerText || '').replace(/\s+\n/g, '\n').trim();
+          if (txt.length > 200) srcs.push({ url: u, text: txt.slice(0, 8000) });
+        } catch (e) { /* skip unreadable sources */ }
+      }
+      if (!srcs.length) { out.textContent = 'Could not read any of the suggested sources. Try rephrasing the topic.'; return; }
+      out.textContent = '✍️ Writing the report…';
+      const sys = 'You write tight research briefs. Plain text with short sections: SUMMARY (2-3 sentences), KEY POINTS (lines starting with "-"), then SOURCES (list the URLs). No markdown symbols.';
+      const body = srcs.map((s) => `SOURCE ${s.url}:\n${s.text}`).join('\n\n');
+      const report = await callAI(`TOPIC: ${q}\n\n${body.slice(0, 24000)}`, sys);
+      const clean = stripConfidence(report);
+      out.innerHTML = '';
+      const rep = document.createElement('div');
+      rep.className = 'gpa-msg ai';
+      out.appendChild(rep);
+      typeText(rep, clean, out, () => { addSaveButton(rep, clean); speak(clean); });
+    } catch (e) {
+      showError(out, e, currentProviderLabel());
+    }
+  });
 
   // ---- Profiles, save state & cross-device sync -----------------------------
   // HOW THIS WORKS (and what it is not):
