@@ -299,6 +299,7 @@
       <div class="gpa-pane active" data-pane="scan">
         <div class="gpa-row">
           <button id="gpa-quiz-btn" class="gpa-btn quiz-btn">✨ Solve quiz on this page</button>
+          <button id="gpa-tutor-btn" class="gpa-btn">🎓 Tutor mode</button>
         </div>
         <div class="gpa-row">
           <button id="gpa-scan-btn" class="gpa-btn">Scan page text</button>
@@ -579,6 +580,11 @@
         <div class="gpa-row">
           <button id="gpa-tts-toggle" class="gpa-btn">🔇 Read answers aloud: OFF</button>
         </div>
+        <div class="gpa-sub" style="margin:14px 0 6px;">Page actions</div>
+        <div class="gpa-row">
+          <button id="gpa-autoconfirm-toggle" class="gpa-btn">✋ Confirm page clicks: ON</button>
+        </div>
+        <div class="gpa-sub">When auto-confirm is ON, "Do it" clicks happen without asking — but anything risky (submit, send, delete, pay…) always still asks first.</div>
         <div class="gpa-sub" style="margin:14px 0 6px;">Typing animation speed</div>
         <div class="gpa-row">
           <button class="gpa-btn speed-btn" data-speed="slow">Slow</button>
@@ -943,6 +949,15 @@
       .gpa-conf-high { background: rgba(34, 197, 94, 0.18); color: #22c55e; }
       .gpa-conf-mid { background: rgba(234, 179, 8, 0.18); color: #eab308; }
       .gpa-conf-low { background: rgba(239, 68, 68, 0.18); color: #ef4444; }
+      /* Tutor mode cards: same grid, but wide enough for the explanation text */
+      .gpa-answer-grid.wide { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+      .gpa-answer-grid.wide .gpa-grid-cell { align-items: flex-start; text-align: left; padding: 10px 12px; }
+      .gpa-answer-grid.wide .gpa-grid-q { font-size: 11px; }
+      .gpa-tutor-why, .gpa-tutor-sol {
+        font-size: 11px; line-height: 1.55; color: ${t.text}; word-break: break-word;
+      }
+      .gpa-tutor-why b, .gpa-tutor-sol b { color: ${t.accent}; font-weight: 700; }
+      .gpa-tutor-pin, .gpa-tutor-card { font-size: 10px; padding: 3px 8px; }
       .gpa-chat {
         flex: 1; min-height: 80px; overflow-y: auto; margin-bottom: 8px;
         display: flex; flex-direction: column; gap: 6px;
@@ -2239,6 +2254,153 @@
        </div>`;
     }).join('');
     el.innerHTML = `<div class="gpa-answer-grid">${cells}</div>`;
+    el.appendChild(buildPracticeFooter(el, arr));
+  }
+
+  // ---- Practice mode: any answer grid can become Study flashcards ----------
+  // Skips "Unclear" answers and questions already in the deck, then reports
+  // how many new cards landed in the Study tab.
+  function addFlashcards(items) {
+    const cards = JSON.parse(localStorage.getItem(FC_KEY) || '[]');
+    let added = 0;
+    (items || []).forEach((it) => {
+      if (!it || !it.q || !it.a || String(it.a).trim().toLowerCase() === 'unclear') return;
+      if (cards.some((c) => normalizeForMatch(c.q) === normalizeForMatch(String(it.q)))) return;
+      cards.push({ q: String(it.q), a: String(it.a), box: 1 });
+      added += 1;
+    });
+    localStorage.setItem(FC_KEY, JSON.stringify(cards));
+    return added;
+  }
+
+  function buildPracticeFooter(el, arr) {
+    const footer = document.createElement('div');
+    footer.className = 'gpa-row';
+    footer.style.marginTop = '8px';
+    const btn = document.createElement('button');
+    btn.className = 'gpa-btn';
+    btn.textContent = '📤 Send all to flashcards';
+    btn.addEventListener('click', () => {
+      const added = addFlashcards(arr);
+      footer.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+      btn.textContent = added ? `✓ Added ${added} card${added === 1 ? '' : 's'} — see the Study tab` : '✓ Already in your deck';
+    });
+    footer.appendChild(btn);
+    return footer;
+  }
+
+  // ---- Tutor mode -----------------------------------------------------------
+  // Same quiz reading as the solver, but the AI also explains WHY each answer
+  // is right and walks through the solution. Results show as rich cards here,
+  // and any card can float a themed popup right next to its question on the
+  // page (with the question text highlighted). You still type and submit
+  // every answer yourself — this is a tutor, not an auto-taker.
+  function renderTutorGrid(el, arr) {
+    el.classList.remove('gpa-typing');
+    const cells = arr.map((it, idx) => {
+      const hasConf = typeof it.c === 'number' && !isNaN(it.c);
+      const pct = hasConf ? Math.max(0, Math.min(100, Math.round(it.c))) : null;
+      const badge = pct === null ? '' : `<span class="gpa-grid-conf ${confidenceClass(pct)}">${pct}%</span>`;
+      const why = it.why ? `<div class="gpa-tutor-why"><b>Why:</b> ${escapeHtml(it.why)}</div>` : '';
+      const sol = it.sol ? `<div class="gpa-tutor-sol"><b>Solution:</b> ${escapeHtml(it.sol)}</div>` : '';
+      const pin = it.h ? `<button class="gpa-btn gpa-tutor-pin" data-idx="${idx}">📍 Show on page</button>` : '';
+      const card = `<button class="gpa-btn gpa-tutor-card" data-idx="${idx}">➕ Flashcard</button>`;
+      return `<div class="gpa-grid-cell" style="animation-delay:${idx * 35}ms">
+         <span class="gpa-grid-q">${escapeHtml(it.q)}</span>
+         <span class="gpa-grid-a">${escapeHtml(it.a)}</span>
+         ${badge}${why}${sol}
+         <div class="gpa-row" style="margin-top:6px;">${pin}${card}</div>
+       </div>`;
+    }).join('');
+    el.innerHTML = `<div class="gpa-answer-grid wide">${cells}</div>`;
+    el.appendChild(buildPracticeFooter(el, arr));
+
+    // onclick (not addEventListener): replaces the previous run's handler so
+    // clicks always map to THIS run's question list.
+    el.onclick = (e) => {
+      const pinBtn = e.target.closest('.gpa-tutor-pin');
+      if (pinBtn) {
+        const item = arr[Number(pinBtn.dataset.idx)];
+        showTutorPopupFor(item);
+        return;
+      }
+      const cardBtn = e.target.closest('.gpa-tutor-card');
+      if (cardBtn) {
+        const item = arr[Number(cardBtn.dataset.idx)];
+        const added = addFlashcards([item]);
+        cardBtn.textContent = added ? '✓ Added' : '✓ In deck';
+        cardBtn.disabled = true;
+      }
+    };
+  }
+
+  // Floats the tutor card for one question next to its highlighted spot on
+  // the page. Highlights the "h" quote first, then anchors the popup to the
+  // span that was just injected (the last entry in injectedHighlights).
+  function showTutorPopupFor(item) {
+    if (!item) return;
+    const found = item.h ? highlightSnippetOnPage(item.h) : false;
+    let rect = null;
+    if (found && injectedHighlights.length) {
+      rect = injectedHighlights[injectedHighlights.length - 1].getBoundingClientRect();
+    }
+    showTutorPopup(rect, item);
+  }
+
+  function showTutorPopup(rect, item) {
+    // One popup at a time.
+    document.querySelectorAll('.gpa-tutor-pop').forEach((p) => p.remove());
+    const t = THEMES[theme] || THEMES.dark;
+    const pop = document.createElement('div');
+    pop.className = 'gpa-tutor-pop';
+    Object.assign(pop.style, {
+      position: 'fixed', zIndex: '2147483647', width: '300px', maxWidth: 'calc(100vw - 24px)',
+      background: t.panel, color: t.text, border: `1px solid ${t.accent}`, borderRadius: '12px',
+      boxShadow: '0 10px 34px rgba(0,0,0,0.5)', padding: '12px 14px',
+      font: '12px/1.5 "JetBrains Mono", ui-monospace, monospace'
+    });
+    const close = document.createElement('button');
+    close.textContent = '✕';
+    Object.assign(close.style, {
+      position: 'absolute', top: '6px', right: '8px', background: 'transparent',
+      border: 'none', color: t.sub, cursor: 'pointer', fontSize: '13px', fontFamily: 'inherit'
+    });
+    close.addEventListener('click', () => pop.remove());
+    pop.appendChild(close);
+
+    const head = document.createElement('div');
+    head.style.cssText = `font-weight:600;color:${t.accent};margin-bottom:6px;padding-right:18px;`;
+    head.textContent = `${item.q} → ${item.a}`;
+    pop.appendChild(head);
+
+    if (item.why) {
+      const why = document.createElement('div');
+      why.style.cssText = `margin-bottom:6px;`;
+      why.innerHTML = `<b style="color:${t.sub}">Why:</b> `;
+      why.appendChild(document.createTextNode(item.why));
+      pop.appendChild(why);
+    }
+    if (item.sol) {
+      const sol = document.createElement('div');
+      sol.innerHTML = `<b style="color:${t.sub}">Solution:</b> `;
+      sol.appendChild(document.createTextNode(item.sol));
+      pop.appendChild(sol);
+    }
+    document.body.appendChild(pop);
+
+    // Anchor beside the question if we know where it is; otherwise center
+    // bottom. Either way, clamp so the card never leaves the screen.
+    let x = window.innerWidth / 2 - 150;
+    let y = window.innerHeight - 220;
+    if (rect) {
+      x = rect.right + 12;
+      y = rect.top - 8;
+      if (x + 300 > window.innerWidth - 8) x = Math.max(8, rect.left - 312);
+      if (y + pop.offsetHeight > window.innerHeight - 8) y = Math.max(8, window.innerHeight - pop.offsetHeight - 8);
+      if (y < 8) y = 8;
+    }
+    pop.style.left = `${Math.round(Math.max(8, Math.min(x, window.innerWidth - 308)))}px`;
+    pop.style.top = `${Math.round(y)}px`;
   }
 
   // The verification pass re-checks answers/confidence but doesn't carry
@@ -3004,6 +3166,47 @@
     }
   });
 
+  // Tutor mode: same page reading as the solver, but every answer comes with
+  // a "why" and a step-by-step solution, and each question can float its
+  // explanation right next to itself on the page. You enter/submit all
+  // answers yourself — the tutor explains, it doesn't take the quiz.
+  const tutorBtn = panel.querySelector('#gpa-tutor-btn');
+  tutorBtn.addEventListener('click', async () => {
+    if (!pageText) pageText = extractPageText();
+    refreshStatus();
+    const choices = extractQuizChoices();
+    const combinedText = choices
+      ? `${pageText}\n\nFORM CONTROLS ON THIS PAGE (dropdowns / multiple-choice / checkboxes):\n${choices}`
+      : pageText;
+
+    const prevLabel = tutorBtn.textContent;
+    tutorBtn.textContent = 'Preparing your tutor…';
+    tutorBtn.disabled = true;
+    scanOutput.innerHTML = '';
+    scanOutput.textContent = 'Reading the page and working out the explanations…';
+    try {
+      const sys = 'You are a patient tutor helping a student understand a quiz, exam, or worksheet on this web page, including any dropdown menus and multiple-choice/checkbox options listed under FORM CONTROLS ON THIS PAGE. Identify every question — including multi-part questions like "2a"/"2b" — and for each give the best correct answer, a clear explanation of WHY it is correct, and a short step-by-step solution. Respond with ONLY a JSON array in this exact shape and nothing else: [{"q":"1","a":"B","c":85,"why":"one or two sentences on why this answer is correct","sol":"short step-by-step working or reasoning, steps separated by ; ","h":"exact verbatim phrase from PAGE TEXT for this question"}] — "q" is the question number/label as a string, "a" is the short correct answer, "c" is your confidence (0-100), "h" is a short exact quote copied verbatim from PAGE TEXT that pinpoints where that question appears. Keep "why" and "sol" tight and genuinely explanatory, in plain language. If you genuinely cannot determine an answer, use "a":"Unclear", a low "c", and say what is missing in "why". Do not include any text outside the JSON array.';
+      const out = await callAI(combinedText, sys, screenshotDataUrl ? [screenshotDataUrl] : null);
+      const grid = tryParseAnswerGrid(out);
+      if (grid) {
+        renderTutorGrid(scanOutput, grid);
+        highlightSnippetsOnPage(grid.map((it) => it.h).filter(Boolean));
+        const hint = document.createElement('div');
+        hint.className = 'gpa-sub';
+        hint.style.marginTop = '6px';
+        hint.textContent = 'Questions are highlighted on the page. Press 📍 on any card to float its explanation right next to the question. You type the answers — the tutor explains.';
+        scanOutput.appendChild(hint);
+      } else {
+        typeText(scanOutput, out, scanOutput);
+      }
+    } catch (e) {
+      showError(scanOutput, e, currentProviderLabel());
+    } finally {
+      tutorBtn.textContent = prevLabel;
+      tutorBtn.disabled = false;
+    }
+  });
+
   scanBtn.addEventListener('click', () => {
     pageText = extractPageText();
     scanOutput.textContent = '';
@@ -3379,6 +3582,7 @@
   // every gpa_* key).
 
   const TTS_KEY = 'gpa_tts_enabled';
+  const AUTOCONFIRM_KEY = 'gpa_autoconfirm';
   const SCRATCH_KEY = 'gpa_scratchpad';
   const FC_KEY = 'gpa_flashcards';
 
@@ -3410,6 +3614,22 @@
     renderTtsBtn();
   });
   renderTtsBtn();
+
+  // Auto-confirm for the "Do it" bar: when ON, harmless page clicks run
+  // without asking. Risky verbs (submit, send, delete, pay…) always keep
+  // their confirmation no matter what — that guard is not bypassable.
+  const autoConfirmBtn = panel.querySelector('#gpa-autoconfirm-toggle');
+  function renderAutoConfirmBtn() {
+    const on = localStorage.getItem(AUTOCONFIRM_KEY) === 'on';
+    autoConfirmBtn.textContent = on ? '⚡ Confirm page clicks: OFF (auto)' : '✋ Confirm page clicks: ON';
+    autoConfirmBtn.classList.toggle('primary', on);
+  }
+  autoConfirmBtn.addEventListener('click', () => {
+    const on = localStorage.getItem(AUTOCONFIRM_KEY) !== 'on';
+    localStorage.setItem(AUTOCONFIRM_KEY, on ? 'on' : 'off');
+    renderAutoConfirmBtn();
+  });
+  renderAutoConfirmBtn();
 
   // Voice input for Ask AI (browser speech recognition).
   (function voiceInput() {
@@ -3656,7 +3876,12 @@
       candidates.sort((a, b) => normalizeForMatch(a.innerText || a.value || '').length - normalizeForMatch(b.innerText || b.value || '').length);
       const el = candidates[0];
       if (plan.action === 'click') {
-        if (!confirm(`About to click: "${(el.innerText || el.value || '').trim().slice(0, 120)}"\n\nProceed?`)) {
+        const clickLabel = (el.innerText || el.value || '').trim();
+        // Risky actions always ask, even with auto-confirm on.
+        const RISKY_CLICK_RE = /\b(submit|post|send|delete|remove|purchase|pay|payment|checkout|order|confirm|enroll|register|sign\s?in|sign\s?out|sign\s?up)\b/i;
+        const risky = RISKY_CLICK_RE.test(clickLabel);
+        const autoOk = localStorage.getItem(AUTOCONFIRM_KEY) === 'on' && !risky;
+        if (!autoOk && !confirm(`About to click: "${clickLabel.slice(0, 120)}"${risky ? '\n\n(This looks like a submit/delete/pay-type action, so it always asks first.)' : ''}\n\nProceed?`)) {
           scanOutput.textContent = 'Cancelled — nothing was clicked.';
           return;
         }
