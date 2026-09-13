@@ -302,6 +302,9 @@
           <button id="gpa-tutor-btn" class="gpa-btn">🎓 Tutor mode</button>
         </div>
         <div class="gpa-row">
+          <button id="gpa-autofollow-btn" class="gpa-btn">📍 Auto-explain: ON</button>
+        </div>
+        <div class="gpa-row">
           <button id="gpa-scan-btn" class="gpa-btn">Scan page text</button>
           <button id="gpa-capture-btn" class="gpa-btn">Capture screen</button>
         </div>
@@ -953,11 +956,18 @@
       .gpa-answer-grid.wide { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
       .gpa-answer-grid.wide .gpa-grid-cell { align-items: flex-start; text-align: left; padding: 10px 12px; }
       .gpa-answer-grid.wide .gpa-grid-q { font-size: 11px; }
-      .gpa-tutor-why, .gpa-tutor-sol {
+      .gpa-tutor-why, .gpa-tutor-sol, .gpa-tutor-concept, .gpa-tutor-pitfall, .gpa-tutor-cite {
         font-size: 11px; line-height: 1.55; color: ${t.text}; word-break: break-word;
       }
-      .gpa-tutor-why b, .gpa-tutor-sol b { color: ${t.accent}; font-weight: 700; }
-      .gpa-tutor-pin, .gpa-tutor-card { font-size: 10px; padding: 3px 8px; }
+      .gpa-tutor-why b, .gpa-tutor-sol b, .gpa-tutor-concept b,
+      .gpa-tutor-pitfall b, .gpa-tutor-cite b { color: ${t.accent}; font-weight: 700; }
+      .gpa-tutor-sol { white-space: pre-wrap; }
+      .gpa-tutor-concept { margin-bottom: 2px; opacity: 0.95; }
+      .gpa-tutor-pitfall { margin-top: 4px; opacity: 0.9; }
+      .gpa-tutor-cite { margin-top: 5px; font-size: 10px; opacity: 0.85; }
+      .gpa-tutor-cite a { color: ${t.accent}; text-decoration: underline; text-underline-offset: 2px; }
+      .gpa-tutor-cite .gpa-cite-plain { opacity: 0.8; }
+      .gpa-tutor-pin, .gpa-tutor-card, .gpa-tutor-save { font-size: 10px; padding: 3px 8px; }
       .gpa-chat {
         flex: 1; min-height: 80px; overflow-y: auto; margin-bottom: 8px;
         display: flex; flex-direction: column; gap: 6px;
@@ -2304,12 +2314,52 @@
     return data?.choices?.[0]?.message?.content || '(no response)';
   }
 
+  // ---- Context memory -------------------------------------------------------
+  // Any saved insight can be switched on as context (the 🧠 button on its card
+  // in the Saved tab). Insights switched on are prepended to the system prompt
+  // of every later AI call, so the assistant carries forward exactly what you
+  // chose to keep and nothing else.
+  //
+  // Opt-in per insight, deliberately: a blanket "remember everything" turns
+  // every unrelated note into a source of confusion three questions later, and
+  // costs tokens on every single request. Off is the default for new insights.
+  const CTX_CHAR_BUDGET = 6000;
+
+  function contextInsights() {
+    try { return savedAll().filter((it) => it.ctx); } catch (e) { return []; }
+  }
+
+  function buildContextMemory() {
+    const picked = contextInsights().sort((a, b) => b.ts - a.ts);
+    if (!picked.length) return '';
+    const parts = [];
+    let used = 0;
+    for (const it of picked) {
+      // Newest first, and stop at the budget rather than truncating mid-note:
+      // half an explanation is worse than one fewer explanation.
+      const entry = `- [${it.label || it.title || 'Saved note'}] ${it.text}`;
+      if (used + entry.length > CTX_CHAR_BUDGET) break;
+      parts.push(entry);
+      used += entry.length;
+    }
+    if (!parts.length) return '';
+    return 'SAVED CONTEXT THE USER CHOSE TO CARRY FORWARD (their own earlier notes and worked explanations). '
+      + 'Treat it as background they already know and build on it — reuse its notation and conclusions instead of re-deriving them. '
+      + 'It describes earlier material, so where it conflicts with what the CURRENT page says, the current page wins.\n'
+      + parts.join('\n') + '\n\n';
+  }
+
   // Dispatches to whichever provider is selected in the Theme tab.
   async function callAI(userText, systemText, imageDataUrls) {
     const provider = localStorage.getItem(PROVIDER_KEY) || 'gemini';
+    // Memory goes in FRONT of the caller's system text, never behind it: the
+    // JSON-only response rules several callers rely on have to be the last
+    // word, or the model starts narrating what it remembered.
+    const memory = buildContextMemory();
+    const sys = memory ? memory + (systemText || '') : systemText;
     return provider === 'openai'
-      ? callOpenAI(userText, systemText, imageDataUrls)
-      : callGemini(userText, systemText, imageDataUrls);
+      ? callOpenAI(userText, sys, imageDataUrls)
+      : callGemini(userText, sys, imageDataUrls);
   }
 
   // Real second-pass check for quiz/answer-grid results: sends the draft
@@ -2484,21 +2534,75 @@
   // and any card can float a themed popup right next to its question on the
   // page (with the question text highlighted). You still type and submit
   // every answer yourself — this is a tutor, not an auto-taker.
+  // The model is asked for cite: [{label, url}], but models being models it
+  // may send a bare string, a single object, or an entry with no label.
+  // Normalize all of that, and drop any url that isn't a real http(s) link so
+  // a malformed value can never be rendered as one.
+  function citeList(item) {
+    const raw = item && item.cite;
+    if (!raw) return [];
+    const arr = Array.isArray(raw) ? raw : [raw];
+    return arr.map((c) => {
+      if (typeof c === 'string') return { label: c.trim(), url: '' };
+      if (!c || typeof c !== 'object') return null;
+      const label = String(c.label || c.name || c.title || c.source || '').trim();
+      let url = String(c.url || c.href || c.link || '').trim();
+      if (!/^https?:\/\//i.test(url)) url = '';
+      if (!label && !url) return null;
+      return { label: label || url, url };
+    }).filter(Boolean).slice(0, 3);
+  }
+
+  function citeHtml(item) {
+    const list = citeList(item);
+    if (!list.length) return '';
+    const inner = list.map((c) => (c.url
+      ? `<a href="${escapeHtml(c.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(c.label)}</a>`
+      : `<span class="gpa-cite-plain">${escapeHtml(c.label)}</span>`)).join(', ');
+    return `<div class="gpa-tutor-cite"><b>Sources:</b> ${inner}</div>`;
+  }
+
+  // Worked solutions come back as steps separated by ";". Split them onto
+  // numbered lines — a single run-on line of semicolons is exactly the thing
+  // people's eyes slide straight off.
+  function formatSolution(sol) {
+    const steps = String(sol || '').split(/\s*;\s*/).map((s) => s.trim()).filter(Boolean);
+    return steps.length < 2 ? String(sol || '') : steps.map((s, i) => `${i + 1}. ${s}`).join('\n');
+  }
+
+  // One tutor answer as plain text: readable in the Saved tab, and ready to
+  // drop straight back into a later prompt if it's switched on as context.
+  function tutorInsightText(item) {
+    if (!item) return '';
+    const lines = [`Q${item.q} — answer: ${item.a}`];
+    if (item.concept) lines.push(`Concept: ${item.concept}`);
+    if (item.why) lines.push(`Why: ${item.why}`);
+    if (item.sol) lines.push(`Solution:\n${formatSolution(item.sol)}`);
+    if (item.pitfall) lines.push(`Common mistake: ${item.pitfall}`);
+    const cites = citeList(item);
+    if (cites.length) lines.push('Sources: ' + cites.map((c) => (c.url ? `${c.label} (${c.url})` : c.label)).join(' | '));
+    if (item.h) lines.push(`From the page: "${item.h}"`);
+    return lines.join('\n');
+  }
+
   function renderTutorGrid(el, arr) {
     el.classList.remove('gpa-typing');
     const cells = arr.map((it, idx) => {
       const hasConf = typeof it.c === 'number' && !isNaN(it.c);
       const pct = hasConf ? Math.max(0, Math.min(100, Math.round(it.c))) : null;
       const badge = pct === null ? '' : `<span class="gpa-grid-conf ${confidenceClass(pct)}">${pct}%</span>`;
+      const concept = it.concept ? `<div class="gpa-tutor-concept"><b>Concept:</b> ${escapeHtml(it.concept)}</div>` : '';
       const why = it.why ? `<div class="gpa-tutor-why"><b>Why:</b> ${escapeHtml(it.why)}</div>` : '';
-      const sol = it.sol ? `<div class="gpa-tutor-sol"><b>Solution:</b> ${escapeHtml(it.sol)}</div>` : '';
+      const sol = it.sol ? `<div class="gpa-tutor-sol"><b>Solution:</b>\n${escapeHtml(formatSolution(it.sol))}</div>` : '';
+      const pitfall = it.pitfall ? `<div class="gpa-tutor-pitfall"><b>Watch out:</b> ${escapeHtml(it.pitfall)}</div>` : '';
       const pin = it.h ? `<button class="gpa-btn gpa-tutor-pin" data-idx="${idx}">📍 Show on page</button>` : '';
       const card = `<button class="gpa-btn gpa-tutor-card" data-idx="${idx}">➕ Flashcard</button>`;
+      const save = `<button class="gpa-btn gpa-tutor-save" data-idx="${idx}">💾 Save</button>`;
       return `<div class="gpa-grid-cell" style="animation-delay:${idx * 35}ms">
          <span class="gpa-grid-q">${escapeHtml(it.q)}</span>
          <span class="gpa-grid-a">${escapeHtml(it.a)}</span>
-         ${badge}${why}${sol}
-         <div class="gpa-row" style="margin-top:6px;">${pin}${card}</div>
+         ${badge}${concept}${why}${sol}${pitfall}${citeHtml(it)}
+         <div class="gpa-row" style="margin-top:6px;">${pin}${card}${save}</div>
        </div>`;
     }).join('');
     el.innerHTML = `<div class="gpa-answer-grid wide">${cells}</div>`;
@@ -2510,7 +2614,13 @@
       const pinBtn = e.target.closest('.gpa-tutor-pin');
       if (pinBtn) {
         const item = arr[Number(pinBtn.dataset.idx)];
+        tutorPopPos = null;   // an explicit pin means "put it back by the question"
         showTutorPopupFor(item);
+        return;
+      }
+      const saveBtn = e.target.closest('.gpa-tutor-save');
+      if (saveBtn) {
+        saveInsight(tutorInsightText(arr[Number(saveBtn.dataset.idx)]));
         return;
       }
       const cardBtn = e.target.closest('.gpa-tutor-card');
@@ -2528,68 +2638,289 @@
   // span that was just injected (the last entry in injectedHighlights).
   function showTutorPopupFor(item) {
     if (!item) return;
-    const found = item.h ? highlightSnippetOnPage(item.h) : false;
+    const span = item.h ? highlightSnippetOnPage(item.h) : false;
     let rect = null;
-    if (found && injectedHighlights.length) {
-      rect = injectedHighlights[injectedHighlights.length - 1].getBoundingClientRect();
-    }
+    if (span && span.getBoundingClientRect) rect = span.getBoundingClientRect();
+    else if (injectedHighlights.length) rect = injectedHighlights[injectedHighlights.length - 1].getBoundingClientRect();
     showTutorPopup(rect, item);
   }
 
-  function showTutorPopup(rect, item) {
-    // One popup at a time.
+  // Where the user dragged the popup to, if they have. Deliberately remembered
+  // across questions: drag it once into a clear corner and it stays there as
+  // the quiz advances, rather than springing back beside each new question.
+  let tutorPopPos = null;
+  let tutorPopCleanup = null;
+
+  function closeTutorPopup() {
+    if (tutorPopCleanup) { tutorPopCleanup(); tutorPopCleanup = null; }
     document.querySelectorAll('.gpa-tutor-pop').forEach((p) => p.remove());
+  }
+
+  function showTutorPopup(rect, item) {
+    closeTutorPopup();   // one popup at a time
     const t = THEMES[theme] || THEMES.dark;
     const pop = document.createElement('div');
     pop.className = 'gpa-tutor-pop';
     Object.assign(pop.style, {
-      position: 'fixed', zIndex: '2147483647', width: '300px', maxWidth: 'calc(100vw - 24px)',
+      position: 'fixed', zIndex: '2147483647', width: '320px', maxWidth: 'calc(100vw - 24px)',
+      maxHeight: 'calc(100vh - 24px)', overflowY: 'auto',
       background: t.panel, color: t.text, border: `1px solid ${t.accent}`, borderRadius: '12px',
       boxShadow: '0 10px 34px rgba(0,0,0,0.5)', padding: '12px 14px',
       font: '12px/1.5 "JetBrains Mono", ui-monospace, monospace'
     });
+
     const close = document.createElement('button');
     close.textContent = '✕';
     Object.assign(close.style, {
       position: 'absolute', top: '6px', right: '8px', background: 'transparent',
       border: 'none', color: t.sub, cursor: 'pointer', fontSize: '13px', fontFamily: 'inherit'
     });
-    close.addEventListener('click', () => pop.remove());
+    close.addEventListener('click', () => {
+      // Closing means "not this one" — remember it, or auto-explain simply
+      // reopens the same popup on its next scan and the ✕ looks broken.
+      autoFollowDismissed = autoFollowQ;
+      closeTutorPopup();
+    });
     pop.appendChild(close);
 
     const head = document.createElement('div');
-    head.style.cssText = `font-weight:600;color:${t.accent};margin-bottom:6px;padding-right:18px;`;
-    head.textContent = `${item.q} → ${item.a}`;
+    head.style.cssText = `font-weight:600;color:${t.accent};margin-bottom:6px;padding-right:18px;cursor:move;user-select:none;`;
+    head.title = 'Drag to move';
+    head.textContent = `⠿ ${item.q} → ${item.a}`;
     pop.appendChild(head);
 
-    if (item.why) {
-      const why = document.createElement('div');
-      why.style.cssText = `margin-bottom:6px;`;
-      why.innerHTML = `<b style="color:${t.sub}">Why:</b> `;
-      why.appendChild(document.createTextNode(item.why));
-      pop.appendChild(why);
+    const section = (label, text) => {
+      if (!text) return;
+      const d = document.createElement('div');
+      d.style.cssText = 'margin-bottom:6px;white-space:pre-wrap;';
+      d.innerHTML = `<b style="color:${t.sub}">${label}:</b> `;
+      d.appendChild(document.createTextNode(text));
+      pop.appendChild(d);
+    };
+    section('Concept', item.concept);
+    section('Why', item.why);
+    section('Solution', item.sol ? '\n' + formatSolution(item.sol) : '');
+    section('Watch out', item.pitfall);
+
+    const cites = citeList(item);
+    if (cites.length) {
+      const c = document.createElement('div');
+      c.style.cssText = 'margin-top:6px;font-size:10px;opacity:0.85;';
+      c.innerHTML = `<b style="color:${t.sub}">Sources:</b> ` + cites.map((x) => (x.url
+        ? `<a href="${escapeHtml(x.url)}" target="_blank" rel="noopener noreferrer" style="color:${t.accent}">${escapeHtml(x.label)}</a>`
+        : escapeHtml(x.label))).join(', ');
+      pop.appendChild(c);
     }
-    if (item.sol) {
-      const sol = document.createElement('div');
-      sol.innerHTML = `<b style="color:${t.sub}">Solution:</b> `;
-      sol.appendChild(document.createTextNode(item.sol));
-      pop.appendChild(sol);
-    }
+
+    // Footer controls live on the popup itself, not just in the panel — the
+    // panel is often minimized while this is the thing you are reading.
+    const foot = document.createElement('div');
+    foot.style.cssText = 'display:flex;gap:6px;margin-top:9px;flex-wrap:wrap;';
+    const mkBtn = (text, title, fn) => {
+      const b = document.createElement('button');
+      b.textContent = text;
+      b.title = title || '';
+      b.style.cssText = `font:10px/1.4 inherit;padding:4px 8px;border-radius:7px;cursor:pointer;background:transparent;color:${t.text};border:1px solid ${t.accent};`;
+      b.addEventListener('click', fn);
+      foot.appendChild(b);
+      return b;
+    };
+    mkBtn('💾 Save insight', 'Save this explanation — you can switch it on as AI context later', () => {
+      saveInsight(tutorInsightText(item));
+    });
+    const autoBtn = mkBtn(autoFollowOn() ? '⏸ Auto: ON' : '▶ Auto: OFF', 'Follow whichever question is on screen', () => {
+      setAutoFollow(!autoFollowOn());
+      autoBtn.textContent = autoFollowOn() ? '⏸ Auto: ON' : '▶ Auto: OFF';
+    });
+    pop.appendChild(foot);
+
     document.body.appendChild(pop);
 
-    // Anchor beside the question if we know where it is; otherwise center
-    // bottom. Either way, clamp so the card never leaves the screen.
-    let x = window.innerWidth / 2 - 150;
-    let y = window.innerHeight - 220;
-    if (rect) {
-      x = rect.right + 12;
-      y = rect.top - 8;
-      if (x + 300 > window.innerWidth - 8) x = Math.max(8, rect.left - 312);
+    const place = (px, py) => {
+      pop.style.left = `${Math.round(Math.max(8, Math.min(px, window.innerWidth - pop.offsetWidth - 8)))}px`;
+      pop.style.top = `${Math.round(Math.max(8, Math.min(py, window.innerHeight - 40)))}px`;
+    };
+
+    // Position: the user's own spot if they have dragged it, else beside the
+    // question, else bottom-centre. Always clamped inside the viewport.
+    if (tutorPopPos) {
+      place(tutorPopPos.x, tutorPopPos.y);
+    } else if (rect) {
+      let x = rect.right + 12;
+      let y = rect.top - 8;
+      if (x + pop.offsetWidth > window.innerWidth - 8) x = Math.max(8, rect.left - pop.offsetWidth - 12);
       if (y + pop.offsetHeight > window.innerHeight - 8) y = Math.max(8, window.innerHeight - pop.offsetHeight - 8);
-      if (y < 8) y = 8;
+      place(x, Math.max(8, y));
+    } else {
+      place(window.innerWidth / 2 - pop.offsetWidth / 2, window.innerHeight - pop.offsetHeight - 20);
     }
-    pop.style.left = `${Math.round(Math.max(8, Math.min(x, window.innerWidth - 308)))}px`;
-    pop.style.top = `${Math.round(y)}px`;
+
+    // ---- Drag, by the header ----
+    let dragging = false, sx = 0, sy = 0, ox = 0, oy = 0;
+    const down = (e) => {
+      const p = e.touches ? e.touches[0] : e;
+      dragging = true;
+      sx = p.clientX; sy = p.clientY;
+      const r = pop.getBoundingClientRect();
+      ox = r.left; oy = r.top;
+      e.preventDefault();
+    };
+    const move = (e) => {
+      if (!dragging) return;
+      const p = e.touches ? e.touches[0] : e;
+      place(ox + (p.clientX - sx), oy + (p.clientY - sy));
+      e.preventDefault();
+    };
+    const up = () => {
+      if (!dragging) return;
+      dragging = false;
+      const r = pop.getBoundingClientRect();
+      tutorPopPos = { x: r.left, y: r.top };
+    };
+    head.addEventListener('mousedown', down);
+    head.addEventListener('touchstart', down, { passive: false });
+    window.addEventListener('mousemove', move, true);
+    window.addEventListener('touchmove', move, { passive: false, capture: true });
+    window.addEventListener('mouseup', up, true);
+    window.addEventListener('touchend', up, true);
+    // move/up live on window, so they have to come off with the popup or every
+    // popup shown this session keeps listening to every mouse move.
+    tutorPopCleanup = () => {
+      window.removeEventListener('mousemove', move, true);
+      window.removeEventListener('touchmove', move, { capture: true });
+      window.removeEventListener('mouseup', up, true);
+      window.removeEventListener('touchend', up, true);
+    };
+  }
+
+  // ---- Auto-explain: follow whichever question is on screen -------------------
+  // Pressing "Show on page" once per question gets old fast, and stepped
+  // quizzes (one question at a time behind Next/Back) make it worse: the
+  // question changes and the popup doesn't. Auto-explain watches what is
+  // actually visible and swaps the popup to match, so pressing Next means
+  // question 8's explanation is already sitting there.
+  const AUTOFOLLOW_KEY = 'gpa_tutor_autofollow';
+  let tutorRun = [];               // this run's questions
+  let tutorAnchors = new Map();    // question label -> its highlight span
+  let autoFollowQ = null;          // question the popup is showing
+  let autoFollowDismissed = null;  // question the user closed by hand
+  let autoFollowObserver = null;
+  let autoFollowTimer = null;
+  let autoFollowBusy = false;
+  let autoFollowRaf = null;
+
+  function autoFollowOn() { return localStorage.getItem(AUTOFOLLOW_KEY) !== 'off'; }
+
+  function renderAutoFollowBtn() {
+    const btn = panel.querySelector('#gpa-autofollow-btn');
+    if (!btn) return;
+    const on = autoFollowOn();
+    btn.textContent = on ? '📍 Auto-explain: ON' : '📍 Auto-explain: OFF';
+    btn.classList.toggle('primary', on);
+    btn.title = 'After Tutor mode runs, float the explanation for whichever question is on screen and follow along as the quiz advances.';
+  }
+
+  function setAutoFollow(on) {
+    localStorage.setItem(AUTOFOLLOW_KEY, on ? 'on' : 'off');
+    renderAutoFollowBtn();
+    if (on) startAutoFollow(tutorRun);
+    else stopAutoFollow();
+  }
+
+  // The highlight span for one question, created on demand — stepped quizzes
+  // only put a question in the DOM when you reach it.
+  function anchorFor(item) {
+    const key = String(item.q);
+    const existing = tutorAnchors.get(key);
+    if (existing && existing.isConnected) return existing;
+    if (!item.h) return null;
+    // Reuse a highlight that already covers this text (the tutor run
+    // highlights everything up front) rather than wrapping it a second time.
+    const target = normalizeForMatch(item.h);
+    const already = injectedHighlights.find((s) => s.isConnected && normalizeForMatch(s.textContent) === target);
+    if (already) { tutorAnchors.set(key, already); return already; }
+    const span = highlightSnippetOnPage(item.h, { scroll: false });
+    if (span && span.nodeType === 1) { tutorAnchors.set(key, span); return span; }
+    return null;
+  }
+
+  function visibleTutorItem() {
+    let best = null, bestScore = -Infinity;
+    tutorRun.forEach((it) => {
+      const el = anchorFor(it);
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      if (!r.width && !r.height) return;
+      const visible = Math.min(r.bottom, window.innerHeight) - Math.max(r.top, 0);
+      if (visible <= 0) return;                          // off screen entirely
+      const score = visible - Math.max(0, r.top) * 0.2;  // prefer nearer the top
+      if (score > bestScore) { bestScore = score; best = it; }
+    });
+    return best;
+  }
+
+  function autoFollowScan() {
+    if (!autoFollowOn() || !tutorRun.length || autoFollowBusy) return;
+    autoFollowBusy = true;
+    try {
+      const item = visibleTutorItem();
+      if (!item) return;
+      const q = String(item.q);
+      if (q === autoFollowDismissed) return;
+      if (q === String(autoFollowQ) && document.querySelector('.gpa-tutor-pop')) return;
+      autoFollowQ = q;
+      autoFollowDismissed = null;
+      const el = tutorAnchors.get(q);
+      showTutorPopup(el && el.isConnected ? el.getBoundingClientRect() : null, item);
+    } catch (e) {
+      console.warn('[Agent Console] auto-explain scan failed:', e && e.message);
+    } finally {
+      // Highlighting and showing the popup are themselves DOM mutations. Let
+      // them settle before the observer may queue another scan, or injecting
+      // one highlight schedules the scan that injects the next one, forever.
+      setTimeout(() => { autoFollowBusy = false; }, 150);
+    }
+  }
+
+  function scheduleAutoFollow(delay) {
+    clearTimeout(autoFollowTimer);
+    autoFollowTimer = setTimeout(autoFollowScan, delay || 250);
+  }
+
+  function onAutoFollowScroll() {
+    if (autoFollowRaf) return;
+    autoFollowRaf = requestAnimationFrame(() => { autoFollowRaf = null; scheduleAutoFollow(180); });
+  }
+
+  function startAutoFollow(items) {
+    stopAutoFollow();
+    tutorRun = items || [];
+    autoFollowQ = null;
+    autoFollowDismissed = null;
+    if (!autoFollowOn() || !tutorRun.length) return;
+    autoFollowObserver = new MutationObserver((muts) => {
+      const relevant = muts.some((m) => {
+        const node = m.target;
+        const el = node && node.nodeType === 1 ? node : (node && node.parentElement);
+        if (!el || !el.closest) return false;
+        // Our own furniture changing doesn't count as the page changing.
+        return !el.closest('#gpa-root-host, .gpa-tutor-pop, .gpa-page-highlight, .gpa-sel-pop, .gpa-sel-bubble');
+      });
+      if (relevant) scheduleAutoFollow(300);
+    });
+    try {
+      autoFollowObserver.observe(document.body, { childList: true, subtree: true, characterData: true });
+    } catch (e) { /* nothing observable — scroll still drives it */ }
+    window.addEventListener('scroll', onAutoFollowScroll, true);
+    window.addEventListener('resize', onAutoFollowScroll);
+    scheduleAutoFollow(150);
+  }
+
+  function stopAutoFollow() {
+    clearTimeout(autoFollowTimer);
+    if (autoFollowObserver) { autoFollowObserver.disconnect(); autoFollowObserver = null; }
+    window.removeEventListener('scroll', onAutoFollowScroll, true);
+    window.removeEventListener('resize', onAutoFollowScroll);
   }
 
   // The verification pass re-checks answers/confidence but doesn't carry
@@ -2645,6 +2976,14 @@
       }
     });
     injectedHighlights = [];
+    // Clearing the highlights removes every anchor auto-explain was following,
+    // so stop it rather than let it chase spans that are no longer in the DOM.
+    try {
+      stopAutoFollow();
+      closeTutorPopup();
+      tutorAnchors = new Map();
+      tutorRun = [];
+    } catch (e) { /* auto-explain not initialized yet */ }
     const clearBtn = panel.querySelector('#gpa-clear-highlights');
     if (clearBtn) clearBtn.style.display = 'none';
   }
@@ -2686,8 +3025,13 @@
   }
 
   // Highlights the first occurrence of `snippet` found on the page. Returns
-  // true if something was found and highlighted.
-  function highlightSnippetOnPage(snippet) {
+  // the highlight span (truthy) if something was found, false otherwise —
+  // callers that only need a yes/no still work, and auto-explain uses the
+  // span itself as the anchor to position the popup against.
+  // opts.scroll === false suppresses the scroll-into-view, which auto-explain
+  // needs: it highlights questions as they appear, and yanking the page
+  // around while someone is reading is the opposite of helpful.
+  function highlightSnippetOnPage(snippet, opts) {
     if (!snippet || snippet.length < 3) return false;
     const target = normalizeForMatch(snippet);
     if (!target) return false;
@@ -2732,10 +3076,10 @@
       } catch (e) { continue; }
 
       injectedHighlights.push(span);
-      span.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      if (!opts || opts.scroll !== false) span.scrollIntoView({ behavior: 'smooth', block: 'center' });
       const clearBtn = panel.querySelector('#gpa-clear-highlights');
       if (clearBtn) clearBtn.style.display = 'inline-block';
-      return true;
+      return span;
     }
     return false;
   }
@@ -2930,6 +3274,18 @@
       `;
       const actions = document.createElement('div');
       actions.className = 'gpa-insight-actions';
+      // Per-insight context switch. On = this note rides along with every
+      // later AI request as background; off = it just sits here.
+      const ctxBtn = document.createElement('button');
+      ctxBtn.className = 'gpa-btn' + (it.ctx ? ' primary' : '');
+      ctxBtn.textContent = it.ctx ? '🧠 Context: ON' : '🧠 Use as context';
+      ctxBtn.title = it.ctx
+        ? 'This insight is being sent with every AI request. Click to stop.'
+        : 'Send this insight along with every later AI request as background context.';
+      ctxBtn.addEventListener('click', () => {
+        updateInsight(it.id, (x) => { x.ctx = !x.ctx; });
+        renderSavedInsights();
+      });
       const lab = document.createElement('button');
       lab.className = 'gpa-btn';
       lab.textContent = '🏷 Label';
@@ -2952,6 +3308,7 @@
         saveSavedAll(arr);
         renderSavedInsights();
       });
+      actions.appendChild(ctxBtn);
       actions.appendChild(lab);
       actions.appendChild(move);
       actions.appendChild(del);
@@ -3374,16 +3731,33 @@
     scanOutput.innerHTML = '';
     scanOutput.textContent = 'Reading the page and working out the explanations…';
     try {
-      const sys = 'You are a patient tutor helping a student understand a quiz, exam, or worksheet on this web page, including any dropdown menus and multiple-choice/checkbox options listed under FORM CONTROLS ON THIS PAGE. Identify every question — including multi-part questions like "2a"/"2b" — and for each give the best correct answer, a clear explanation of WHY it is correct, and a short step-by-step solution. Respond with ONLY a JSON array in this exact shape and nothing else: [{"q":"1","a":"B","c":85,"why":"one or two sentences on why this answer is correct","sol":"short step-by-step working or reasoning, steps separated by ; ","h":"exact verbatim phrase from PAGE TEXT for this question"}] — "q" is the question number/label as a string, "a" is the short correct answer, "c" is your confidence (0-100), "h" is a short exact quote copied verbatim from PAGE TEXT that pinpoints where that question appears. Keep "why" and "sol" tight and genuinely explanatory, in plain language. If you genuinely cannot determine an answer, use "a":"Unclear", a low "c", and say what is missing in "why". Do not include any text outside the JSON array.';
+      const sys = [
+        'You are an expert tutor helping a student understand a quiz, exam, or worksheet on this web page, including any dropdown menus and multiple-choice/checkbox options listed under FORM CONTROLS ON THIS PAGE.',
+        'Identify every question, including multi-part questions like "2a"/"2b". For EACH question, give an explanation thorough enough that the student could solve the next question like it unaided.',
+        'Fields for each question:',
+        '"q": the question number/label as a string. "a": the short correct answer. "c": your confidence 0-100 that the answer is correct.',
+        '"concept": the single idea or rule being tested, under 10 words.',
+        '"why": 3 to 6 sentences. Give the reasoning that reaches the answer, and say explicitly why each tempting wrong option is wrong, naming them (for example "A is wrong because it counts only the divisors of 2026 itself"). Do not restate the question.',
+        '"sol": the complete worked solution, steps separated by " ; ". SHOW THE REAL WORK - actual numbers, actual arithmetic, actual substitutions at every step. "Factor the number ; use the formula ; compute the result" is useless and unacceptable. "2026 = 2 x 1013 ; 1013 is prime, since no prime up to 31 divides it ; so 2026^2 = 2^2 x 1013^2 ; divisor count = (2+1)(2+1) = 9" is the required level of detail.',
+        '"pitfall": the single most common mistake a student makes on this question, one sentence.',
+        '"cite": an array of 1 to 3 sources the explanation rests on, each {"label":"name of the rule, theorem, definition or section","url":"https://..."}.',
+        'NEVER invent, guess, or approximate a URL. Include "url" ONLY when you are certain that exact address exists (Wikipedia article titles and official documentation are usually safe); otherwise give "label" alone and omit "url" entirely. A named rule with no link is far more useful than a link that 404s. When the answer rests only on information stated on the page, cite {"label":"Stated on this page"}.',
+        '"h": a short exact quote copied verbatim from PAGE TEXT that pinpoints where that question appears.',
+        'Respond with ONLY a JSON array and nothing else, in exactly this shape: [{"q":"7","a":"B","c":90,"concept":"...","why":"...","sol":"... ; ... ; ...","pitfall":"...","cite":[{"label":"...","url":"..."}],"h":"..."}].',
+        'If you genuinely cannot determine an answer, use "a":"Unclear", a low "c", and say what is missing in "why". Do not include any text outside the JSON array.'
+      ].join(' ');
       const out = await callAI(combinedText, sys, screenshotDataUrl ? [screenshotDataUrl] : null);
       const grid = tryParseAnswerGrid(out);
       if (grid) {
         renderTutorGrid(scanOutput, grid);
         highlightSnippetsOnPage(grid.map((it) => it.h).filter(Boolean));
+        startAutoFollow(grid);
         const hint = document.createElement('div');
         hint.className = 'gpa-sub';
         hint.style.marginTop = '6px';
-        hint.textContent = 'Questions are highlighted on the page. Press 📍 on any card to float its explanation right next to the question. You type the answers — the tutor explains.';
+        hint.textContent = autoFollowOn()
+          ? 'Questions are highlighted on the page, and the explanation for whichever one is on screen floats next to it automatically — it follows along as you press Next. Drag the popup by its header to park it anywhere. 💾 saves an explanation you can switch on later as AI context. You type the answers; the tutor explains.'
+          : 'Questions are highlighted on the page. Press 📍 on any card to float its explanation next to the question, or turn Auto-explain on to have it follow the question you are looking at. You type the answers; the tutor explains.';
         scanOutput.appendChild(hint);
       } else {
         typeText(scanOutput, out, scanOutput);
@@ -3395,6 +3769,9 @@
       tutorBtn.disabled = false;
     }
   });
+
+  panel.querySelector('#gpa-autofollow-btn').addEventListener('click', () => setAutoFollow(!autoFollowOn()));
+  renderAutoFollowBtn();
 
   scanBtn.addEventListener('click', () => {
     pageText = extractPageText();
