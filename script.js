@@ -2209,13 +2209,21 @@
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${key}`
     };
-    // Backup channel: some pages' wrappers strip the Authorization header in
-    // transit. A custom header survives that, and our worker converts it back
-    // to Authorization server-side. Only sent through our own proxy —
-    // api.openai.com wouldn't accept it in direct mode.
-    if (OPENAI_PROXY) headers['X-GPA-Key'] = key;
+    // Backup channels for pages whose wrappers strip the Authorization
+    // header in transit: (1) X-GPA-Key custom header, (2) ?key= query
+    // parameter in the URL itself — a header-stripping wrapper can rewrite
+    // headers, but the URL arrives intact. The worker converts either back
+    // into a real Authorization header before forwarding to OpenAI. Both
+    // are only sent through our own proxy — api.openai.com wouldn't accept
+    // them in direct mode.
+    if (OPENAI_PROXY) {
+      headers['X-GPA-Key'] = key;
+    }
+    const endpoint = OPENAI_PROXY
+      ? `${OPENAI_PROXY}/v1/chat/completions?key=${encodeURIComponent(key)}`
+      : 'https://api.openai.com/v1/chat/completions';
 
-    const res = await rawFetch(`${OPENAI_PROXY || 'https://api.openai.com'}/v1/chat/completions`, {
+    const res = await rawFetch(endpoint, {
       method: 'POST',
       headers,
       body: JSON.stringify({ model: OPENAI_MODEL, messages })

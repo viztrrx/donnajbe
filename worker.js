@@ -65,8 +65,11 @@ export default {
 
     // ---- /v1/* : forward to OpenAI ----
     // Authorization first, but if the browser's wrapper stripped it, fall
-    // back to the X-GPA-Key backup header the panel sends.
+    // back to the ?key= query parameter (survives header-stripping wrappers)
+    // and then the X-GPA-Key backup header the panel sends.
+    const keyParam = url.searchParams.get('key');
     const authHeader = req.headers.get('Authorization')
+      || (keyParam ? `Bearer ${keyParam}` : null)
       || (req.headers.get('X-GPA-Key') ? `Bearer ${req.headers.get('X-GPA-Key')}` : null);
     const res = await fetch('https://api.openai.com' + url.pathname, {
       method: req.method,
