@@ -1998,14 +1998,63 @@
     });
   });
 
+  // ---- API key hygiene ----------------------------------------------------
+  // Keys get pasted out of web pages, PDFs, docs and chat apps, which is how
+  // invisible characters end up inside them: zero-width spaces, non-breaking
+  // spaces, soft hyphens, stray newlines. Every one of those is ILLEGAL in an
+  // HTTP header value, so fetch() rejects the entire request with the famously
+  // unhelpful "Failed to execute 'fetch' on 'Window': Invalid value" — thrown
+  // locally, before a single byte reaches the API, and identical whether the
+  // key is good or garbage. Worse, XMLHttpRequest silently declines to set the
+  // bad header instead of throwing, so that transport sends an unauthenticated
+  // request and the API answers 401 — which reads like a rejected key and
+  // sends you off rotating a key that was fine all along.
+  //
+  // So: scrub on the way in and on the way out. A header value may only
+  // contain printable ASCII (0x21-0x7E); anything else is removed.
+  const HEADER_SAFE_RE = /^[\x21-\x7E]+$/;
+
+  function sanitizeKey(raw) {
+    if (!raw) return '';
+    // One rule covers every case: keep printable ASCII, drop everything else.
+    // That removes spaces, tabs and newlines (0x20 and below), and every
+    // invisible troublemaker above 0x7E — zero-width space U+200B, zero-width
+    // joiner U+200D, BOM U+FEFF, non-breaking space U+00A0, soft hyphen
+    // U+00AD — none of which can legally appear in a header value anyway.
+    return String(raw).replace(/[^\x21-\x7E]/g, '');
+  }
+
+  // Reads a stored key, scrubs it, and writes the clean version back so the
+  // repair sticks instead of being redone on every request.
+  function readStoredKey(storageKey) {
+    const raw = localStorage.getItem(storageKey);
+    if (!raw) return '';
+    const clean = sanitizeKey(raw);
+    if (clean !== raw) {
+      if (clean) localStorage.setItem(storageKey, clean);
+      console.info('[Agent Console] removed ' + (raw.length - clean.length) + ' invisible/illegal character(s) from the saved key');
+    }
+    return clean;
+  }
+
+  // Last line of defence before a key goes into a header.
+  function assertHeaderSafe(key, providerLabel) {
+    if (!HEADER_SAFE_RE.test(key)) {
+      throw new Error(
+        `Your ${providerLabel} key contains characters that cannot be sent in a request header. ` +
+        'Clear the key in Settings and paste it again — copying it from a plain text field avoids the hidden formatting that causes this.'
+      );
+    }
+  }
+
   // ---- Gemini API helpers -----------------------------------------------
   function getApiKey() {
-    let key = API_KEY_DEFAULT || localStorage.getItem(STORAGE_KEY);
+    let key = sanitizeKey(API_KEY_DEFAULT) || readStoredKey(STORAGE_KEY);
     if (!key) {
-      key = prompt('Paste your Gemini API key (from aistudio.google.com/apikey):');
-      if (key) localStorage.setItem(STORAGE_KEY, key.trim());
+      key = sanitizeKey(prompt('Paste your Gemini API key (from aistudio.google.com/apikey):'));
+      if (key) localStorage.setItem(STORAGE_KEY, key);
     }
-    return key ? key.trim() : null;
+    return key || null;
   }
 
   async function callGemini(userText, systemText, imageDataUrls) {
@@ -2041,18 +2090,17 @@
 
   // ---- OpenAI API helpers -------------------------------------------------
   function getOpenAiKey() {
-    let key = localStorage.getItem(OPENAI_STORAGE_KEY);
+    let key = readStoredKey(OPENAI_STORAGE_KEY);
     if (!key) {
-      key = prompt('Paste your OpenAI API key (starts with "sk-"):');
+      key = sanitizeKey(prompt('Paste your OpenAI API key (starts with "sk-"):'));
       if (key) {
-        key = key.trim();
         if (!key.startsWith('sk-')) {
           alert('That doesn\'t look like an OpenAI key — they normally start with "sk-". Saving it anyway; double-check if requests fail.');
         }
         localStorage.setItem(OPENAI_STORAGE_KEY, key);
       }
     }
-    return key ? key.trim() : null;
+    return key || null;
   }
 
   // Native fetch that bypasses the page's own monkey-patched window.fetch.
@@ -2124,7 +2172,18 @@
       const xhr = new XMLHttpRequest();
       xhr.open(opts.method || 'GET', url, true);
       const headers = opts.headers || {};
-      Object.keys(headers).forEach((k) => { try { xhr.setRequestHeader(k, headers[k]); } catch (e) { /* skip */ } });
+      // A header that can't be set must fail this transport, not be skipped.
+      // Skipping it sends an unauthenticated request, which comes back as a
+      // 401 that looks exactly like a rejected key — the single most
+      // misleading failure this script can produce. Fail here instead, so the
+      // real reason reaches the console and the next transport gets a turn.
+      try {
+        Object.keys(headers).forEach((k) => xhr.setRequestHeader(k, headers[k]));
+      } catch (e) {
+        xhr.abort();
+        reject(new TypeError('XHR refused header: ' + ((e && e.message) || e)));
+        return;
+      }
       xhr.withCredentials = false;
       const makeResponse = () => ({
         ok: xhr.status >= 200 && xhr.status < 300,
@@ -2205,28 +2264,37 @@
     if (systemText) messages.push({ role: 'system', content: systemText });
     messages.push({ role: 'user', content });
 
+    assertHeaderSafe(key, 'OpenAI');
+
     const headers = {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${key}`
     };
-    // Backup channels for pages whose wrappers strip the Authorization
-    // header in transit: (1) X-GPA-Key custom header, (2) ?key= query
-    // parameter in the URL itself — a header-stripping wrapper can rewrite
-    // headers, but the URL arrives intact. The worker converts either back
-    // into a real Authorization header before forwarding to OpenAI. Both
-    // are only sent through our own proxy — api.openai.com wouldn't accept
+    const payload = { model: OPENAI_MODEL, messages };
+    // Backup channels for pages whose wrappers strip the Authorization header
+    // in transit: (1) the X-GPA-Key custom header, (2) a _gpa_key field in the
+    // request body. The worker converts either back into a real Authorization
+    // header before forwarding, and strips _gpa_key so it never reaches
+    // OpenAI. Both only go through our own proxy — api.openai.com would reject
     // them in direct mode.
+    //
+    // The body is deliberately used here rather than a ?key= query parameter.
+    // A key in a URL is a key in your browser history, in the Referer header
+    // sent to third parties, in proxy and CDN access logs, and legible in any
+    // screenshot of the network tab — a query-string key should be considered
+    // burned the moment it is used. Request bodies are logged by none of that.
     if (OPENAI_PROXY) {
       headers['X-GPA-Key'] = key;
+      payload._gpa_key = key;
     }
     const endpoint = OPENAI_PROXY
-      ? `${OPENAI_PROXY}/v1/chat/completions?key=${encodeURIComponent(key)}`
+      ? `${OPENAI_PROXY}/v1/chat/completions`
       : 'https://api.openai.com/v1/chat/completions';
 
     const res = await rawFetch(endpoint, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ model: OPENAI_MODEL, messages })
+      body: JSON.stringify(payload)
     });
     if (!res.ok) {
       const errText = await res.text().catch(() => '');
@@ -2271,6 +2339,12 @@
     const status = statusMatch ? statusMatch[1] : null;
 
     if (/No .*API key provided/i.test(msg)) return 'No API key entered yet — try again and paste one when prompted.';
+    if (/cannot be sent in a request header|Invalid value|refused header/i.test(msg)) {
+      return 'Your saved API key has hidden characters in it — that happens when it is copied out of a styled page or document. Clear the key in Settings, then paste it again.';
+    }
+    if (status === '401' && /didn'?t provide an API key|No API key provided|api key was not provided/i.test(msg)) {
+      return 'Your key never made it to the API. If you updated script.js recently, redeploy worker.js to Cloudflare as well — the two have to match.';
+    }
     if (/Nothing to send|Nothing to analyze/i.test(msg)) return 'Nothing to work with yet — scan the page, capture the screen, or type something first.';
     if (status === '401' || /invalid.*key|unauthorized|API key not valid/i.test(msg)) {
       return `${label} rejected your API key. Double-check it (or clear and re-enter it) in the Theme tab.`;
