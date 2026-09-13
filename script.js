@@ -7713,6 +7713,16 @@
       panel.appendChild(modOverlayEl);
     }
     const blocked = kind === 'blocked';
+    // Blocking should also cut AI use immediately, not just cover the panel.
+    aiBlocked = blocked;
+    modOverlayEl.style.display = 'flex';
+    // Don't rebuild the DOM if nothing changed — the 15s status poll calls this
+    // repeatedly, and rebuilding would wipe whatever the user is typing into
+    // the unlock field and steal focus.
+    const sig = kind + '|' + (reason || '');
+    if (modOverlayEl._sig === sig) return;
+    modOverlayEl._sig = sig;
+
     modOverlayEl.style.background = blocked ? 'rgba(20,4,4,0.94)' : 'rgba(10,10,16,0.92)';
     modOverlayEl.style.border = `2px solid ${blocked ? '#e5453a' : t.accent}`;
     modOverlayEl.innerHTML =
@@ -7721,9 +7731,60 @@
       + `${blocked ? 'Blocked by the owner' : 'Locked by the owner'}</div>`
       + `<div style="font:12px/1.5 ui-monospace,monospace;color:#e8e8ea;max-width:280px;">`
       + `${reason ? escapeHtml(reason) : (blocked ? 'Your access to this tool has been turned off.' : 'This tool is temporarily locked. Check back later.')}</div>`;
-    modOverlayEl.style.display = 'flex';
-    // Blocking should also cut AI use immediately, not just cover the panel.
-    aiBlocked = blocked;
+
+    // Only a full block offers the self-service unlock code (a lock is meant to
+    // be brief and lifted by the owner).
+    if (blocked) {
+      const wrap = document.createElement('div');
+      wrap.style.cssText = 'display:flex;flex-direction:column;gap:6px;align-items:center;margin-top:6px;';
+      const label = document.createElement('div');
+      label.style.cssText = 'font:10px/1.4 ui-monospace,monospace;color:#b8b8bc;';
+      label.textContent = 'Have an unlock code from the owner?';
+      const inp = document.createElement('input');
+      inp.placeholder = 'Unlock code';
+      inp.autocomplete = 'off';
+      inp.style.cssText = `text-align:center;text-transform:uppercase;letter-spacing:2px;font:13px/1 ui-monospace,monospace;`
+        + `padding:7px 10px;border-radius:7px;border:1px solid ${t.accent};background:${t.field};color:${t.text};width:150px;`;
+      const btn = document.createElement('button');
+      btn.textContent = 'Unlock';
+      btn.style.cssText = `font:11px/1 ui-monospace,monospace;padding:7px 14px;border-radius:7px;cursor:pointer;`
+        + `background:${t.accent};color:#000;border:none;`;
+      const msg = document.createElement('div');
+      msg.style.cssText = 'font:10px/1.4 ui-monospace,monospace;color:#ff9a9a;min-height:12px;';
+      const redeem = () => redeemUnlock(inp.value, msg, btn);
+      btn.addEventListener('click', redeem);
+      inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') redeem(); });
+      wrap.appendChild(label); wrap.appendChild(inp); wrap.appendChild(btn); wrap.appendChild(msg);
+      modOverlayEl.appendChild(wrap);
+    }
+  }
+
+  async function redeemUnlock(code, msgEl, btn) {
+    code = (code || '').trim();
+    if (!code) { if (msgEl) msgEl.textContent = 'Enter the code first.'; return; }
+    if (!currentUser) { if (msgEl) msgEl.textContent = 'Sign in first.'; return; }
+    if (btn) { btn.disabled = true; btn.textContent = 'Checking…'; }
+    try {
+      const res = await fetch(telemetryEndpoint() + '/unlock', {
+        method: 'POST', headers: { 'Content-Type': 'text/plain' },
+        body: JSON.stringify({ user: currentUser, code })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (data && data.ok) {
+        // Released. Clear the overlay immediately; the next poll confirms.
+        modBaselineKick = null;
+        modOverlayEl._sig = '';
+        hideModOverlay();
+      } else if (msgEl) {
+        msgEl.style.color = '#ff9a9a';
+        msgEl.textContent = (data && data.error) === 'invalid code' ? 'That code is not valid.'
+          : (data && data.error) || 'Could not unlock.';
+      }
+    } catch (e) {
+      if (msgEl) msgEl.textContent = 'Network error — try again.';
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Unlock'; }
+    }
   }
   function hideModOverlay() {
     aiBlocked = false;
@@ -7913,8 +7974,12 @@
         `<button class="gpa-btn gpa-mod-btn" data-mod-user="${escapeHtml(user)}" data-mod-action="${action}" title="${title}"`
         + ` style="font-size:9px;padding:2px 6px;">${label}</button>`;
       const parts = [];
-      if (state === 'blocked') parts.push(b('unblock', '✅ Unblock', 'Restore access'));
-      else parts.push(b('block', '⛔ Block', 'Blocked-by-owner page + cut off AI'));
+      if (state === 'blocked') {
+        parts.push(b('unblock', '✅ Unblock', 'Restore access'));
+        parts.push(b('code', '🔑 Code', 'Generate a one-time code this user can enter to unlock themselves'));
+      } else {
+        parts.push(b('block', '⛔ Block', 'Blocked-by-owner page + cut off AI'));
+      }
       if (state === 'locked') parts.push(b('unlock', '🔓 Unlock', 'Remove the lock'));
       else if (state !== 'blocked') parts.push(b('lock', '🔒 Lock', 'Temporarily freeze their panel'));
       parts.push(b('kick', '👢 Kick', 'Force a one-time sign-out'));
@@ -7942,8 +8007,30 @@
         + `<div class="gpa-admin-users">${userRows || '<div class="gpa-sub">No users recorded yet.</div>'}</div>`;
     }
 
+    // Mints a one-time unlock code the owner can hand to one blocked user.
+    async function genUnlockCode(user) {
+      const token = teleToken.value.trim();
+      const base = (teleEndpoint.value.trim() || TELEMETRY_ENDPOINT || '').replace(/\/+$/, '');
+      if (!token || !base) { teleMsg.textContent = 'Set the worker URL and admin token first.'; return; }
+      teleMsg.textContent = 'Generating code for ' + user + '…';
+      try {
+        const res = await fetch(base + '/admin/setunlock?token=' + encodeURIComponent(token), {
+          method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify({ user })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.code) throw new Error(data.error || ('HTTP ' + res.status));
+        try { await navigator.clipboard.writeText(data.code); } catch (e) { /* clipboard optional */ }
+        teleMsg.innerHTML = `Unlock code for <b>${escapeHtml(user)}</b>: `
+          + `<span style="font-family:ui-monospace,monospace;letter-spacing:2px;color:${(THEMES[theme] || THEMES.dark).accent};">${escapeHtml(data.code)}</span>`
+          + ` — copied. Give it to them; it works once and unlocks only them.`;
+      } catch (e) {
+        teleMsg.textContent = 'Could not make a code: ' + e.message;
+      }
+    }
+
     // One delegated handler for every moderation button.
     async function moderate(user, action) {
+      if (action === 'code') { genUnlockCode(user); return; }
       const token = teleToken.value.trim();
       const base = (teleEndpoint.value.trim() || TELEMETRY_ENDPOINT || '').replace(/\/+$/, '');
       if (!token || !base) { teleMsg.textContent = 'Set the worker URL and admin token first.'; return; }
