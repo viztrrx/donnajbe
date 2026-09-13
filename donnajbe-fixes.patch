@@ -1,7 +1,7 @@
 From 287d2c4457f245f3e5fcb5f88d2c45ea29e1e90d Mon Sep 17 00:00:00 2001
 From: Claude <noreply@anthropic.com>
 Date: Sun, 13 Sep 2026 19:14:09 +0000
-Subject: [PATCH 1/3] Add README, MIT license, and package manifest
+Subject: [PATCH 1/6] Add README, MIT license, and package manifest
 
 The repo had no project metadata, so anyone landing on it had to read
 7k lines of script.js to work out what it is or how to run it.
@@ -255,7 +255,7 @@ index 0000000..d6eb751
 From 6aff9663cbe7b4105387c046fa3cd18225ec5a8b Mon Sep 17 00:00:00 2001
 From: Claude <noreply@anthropic.com>
 Date: Sun, 13 Sep 2026 19:25:20 +0000
-Subject: [PATCH 2/3] Fix requests failing with "Invalid value" from a key with
+Subject: [PATCH 2/6] Fix requests failing with "Invalid value" from a key with
  hidden characters
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
@@ -583,7 +583,7 @@ index 6b9d26f..18580da 100644
 From 883cbbe51cf2960a2220560fcc55b5a91a371a78 Mon Sep 17 00:00:00 2001
 From: Claude <noreply@anthropic.com>
 Date: Sun, 13 Sep 2026 19:49:44 +0000
-Subject: [PATCH 3/3] Tutor mode: auto-explain on the page, cited sources,
+Subject: [PATCH 3/6] Tutor mode: auto-explain on the page, cited sources,
  insights as AI context
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
@@ -1292,3 +1292,1627 @@ index 4364677..733982e 100644
 -- 
 2.43.0
 
+
+From eeef8937ec4c8b722c5db4933b8d58bb256523e3 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sun, 13 Sep 2026 20:07:58 +0000
+Subject: [PATCH 4/6] Add hidden PIN-gated admin console: usage logs, power
+ tools, telemetry
+
+A concealed owner dashboard, opened by clicking the "Account & sync"
+heading five times and entering a PIN (1029). Re-locks on every
+injection so the PIN is required each session.
+
+Usage tab: a local log of every open on this browser (profile name,
+timestamp, url, host, user-agent), with stat cards, a per-user
+last-seen list, and export/clear. Logged from enterApp, best-effort so
+it can never block a sign-in.
+
+Power tools tab: model override for either provider, a system-prompt
+prefix prepended to every callAI request, max-page-chars, OpenAI
+temperature, and a raw prompt playground. Overrides read through
+effectiveModel/effectiveMaxPageChars/effectiveTemp/adminSysPrefix at the
+call sites; admin keys are added to NON_PROFILE_KEYS so they're
+device-global and survive profile sign-in rather than being wiped.
+
+Data tab: inline localStorage editor, export-all, wipe-all.
+
+Cross-device telemetry (opt-in, off by default): mirrors opens to a
+shared JSONBin so the owner can see other people's devices. When on,
+end users get a one-time on-page notice that usage is recorded; that
+notice is not config-removable, because logging people who aren't told
+is the line this shouldn't cross. The reality of client-side limits (PIN
+is in public source, shared bin key ships in the client) is stated both
+in the panel and the README rather than papered over.
+
+Verified in Chromium: PIN 1029 unlocks and 0000 does not; admin hidden
+until unlocked; opens log per user; unique-user stats correct; admin
+override survives profile sign-in and reaches the request URL; telemetry
+off by default makes zero network calls and shows no notice.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_019GqTQm8E1znRkM37YVj6K7
+---
+ README.md |  13 ++
+ script.js | 524 +++++++++++++++++++++++++++++++++++++++++++++++++++++-
+ 2 files changed, 528 insertions(+), 9 deletions(-)
+
+diff --git a/README.md b/README.md
+index 664c1fd..c56d3cc 100644
+--- a/README.md
++++ b/README.md
+@@ -89,6 +89,19 @@ Insights you save get organized into folders and a calendar view, alongside an a
+ 
+ **Context memory.** Each saved insight has a 🧠 toggle. Switch it on and that insight travels with every later AI request as background the assistant already knows — so a worked explanation you saved on question 7 informs the answer to question 9, or notes from one page carry into a different one. It's opt-in per insight and off by default, on purpose: a blanket "remember everything" turns every unrelated note into a source of confusion and costs tokens on every request. Selected insights go in newest-first up to a character budget, and the prompt tells the model that when saved context conflicts with the page currently open, the page wins.
+ 
++### Admin console
++A hidden owner dashboard in Settings. To open it: click the **Account & sync** heading five times quickly, then enter the PIN (`1029`). It re-locks every time the script is re-injected, so the PIN is asked for each session. It has three tabs:
++
++- **Usage** — a log of every time the tool was opened on this browser, with the profile name, timestamp, page, and host. Stat cards for total opens, unique users, opens today; a per-user list with counts and last-seen; and recent activity. Export the log to JSON or clear it.
++- **Power tools** — override the AI model for either provider, prepend a standing system-prompt to every request, change how much page text is sent, set the OpenAI temperature, and a raw prompt playground that talks straight to the model.
++- **Data** — an inline editor for every `gpa_*` value in this browser, export-everything, and a wipe-all.
++
++**Two honest limits, because they matter:**
++
++*This is a soft lock, not security.* The PIN lives in the script, which is public — anyone who reads the source sees `1029` — and every "admin-only" value sits in the same `localStorage` any visitor can open in DevTools. It keeps a casual user out of the dashboard; it does not protect anything. Don't put anything genuinely sensitive behind it.
++
++*Seeing other people needs a server, and honesty.* Because `localStorage` is per-browser, the local log only ever shows *this* browser — your own opens. To see opens from other people's devices, the Usage tab has optional **cross-device telemetry**: point every copy at one shared JSONBin and opens collect there. It's off until you turn it on, and when it's on, anyone who opens the tool sees a one-time notice that usage is recorded (the profile name and open times — never what they type). That notice is deliberately not removable from the settings: logging people who know they're logged is analytics; logging people who don't is spyware, and the second one isn't something this builds. Note too that the shared bin's key has to ship inside the script, so those remote logs are low-security by nature — anyone with the tool can read or clear them.
++
+ ### Browser
+ A plain iframe with a URL bar. It only loads sites that allow being embedded — banks, most social apps, and SoundCloud's own site set `X-Frame-Options` or CSP `frame-ancestors` to prevent it. That's a protection those sites deliberately set, and this script makes no attempt to circumvent it.
+ 
+diff --git a/script.js b/script.js
+index 733982e..2b8df87 100644
+--- a/script.js
++++ b/script.js
+@@ -552,7 +552,7 @@
+           <label for="gpa-custom-color" class="gpa-sub" style="flex:1;">Custom color (pick any shade)</label>
+           <input type="color" id="gpa-custom-color" class="gpa-color-input" value="#8b5cf6" />
+         </div>
+-        <div class="gpa-sub" style="margin:14px 0 6px;">Account &amp; sync</div>
++        <div id="gpa-account-heading" class="gpa-sub" style="margin:14px 0 6px; cursor:default; user-select:none;">Account &amp; sync</div>
+         <div class="gpa-row">
+           <span id="gpa-account-who" class="gpa-sub">Not signed in</span>
+           <button id="gpa-logout-btn" class="gpa-btn">Sign out</button>
+@@ -648,6 +648,99 @@
+           <button id="gpa-clear-openai-key" class="gpa-btn">Clear saved OpenAI key</button>
+           <button id="gpa-clear-yt-key" class="gpa-btn">Clear saved YouTube key</button>
+         </div>
++
++        <!-- Admin console: hidden until unlocked by the secret gesture on the
++             "Account & sync" heading (click it 5x) + PIN. Rendered here but
++             display:none, and re-hidden on every load. -->
++        <div id="gpa-admin" style="display:none; margin-top:16px; border-top:1px dashed var(--gpa-accent,#888); padding-top:12px;">
++          <div class="gpa-row" style="justify-content:space-between;">
++            <div class="gpa-sub gpa-admin-title">🛠 Admin console</div>
++            <button id="gpa-admin-lock" class="gpa-btn">🔒 Lock</button>
++          </div>
++
++          <div class="gpa-admin-note" id="gpa-admin-reality"></div>
++
++          <div class="gpa-admin-tabs">
++            <button class="gpa-admin-tab primary" data-atab="usage">📊 Usage</button>
++            <button class="gpa-admin-tab" data-atab="tools">⚙️ Power tools</button>
++            <button class="gpa-admin-tab" data-atab="data">🗄 Data</button>
++          </div>
++
++          <!-- Usage / logs -->
++          <div class="gpa-admin-pane active" data-apane="usage">
++            <div id="gpa-admin-stats" class="gpa-admin-stats"></div>
++            <div class="gpa-row" style="margin-top:8px; flex-wrap:wrap;">
++              <button id="gpa-admin-refresh" class="gpa-btn" style="flex:1;">↻ Refresh</button>
++              <button id="gpa-admin-export-logs" class="gpa-btn" style="flex:1;">⬇ Export logs</button>
++              <button id="gpa-admin-clear-logs" class="gpa-btn" style="flex:1;">🗑 Clear logs</button>
++            </div>
++            <div class="gpa-sub" style="margin:12px 0 4px;">Everyone seen on this browser</div>
++            <div id="gpa-admin-users" class="gpa-admin-users"></div>
++            <div class="gpa-sub" style="margin:12px 0 4px;">Recent activity</div>
++            <div id="gpa-admin-log" class="gpa-admin-log"></div>
++
++            <div class="gpa-sub" style="margin:16px 0 4px;">Cross-device telemetry (see other people, not just this browser)</div>
++            <div class="gpa-admin-note">
++              This is the only way to see opens from other people's devices. It needs a shared
++              JSONBin the owner sets up, and — honestly — a key placed in a public script can't be
++              kept owner-only, so treat these logs as low-security. When it's on, anyone who opens
++              the tool sees a one-time notice that usage is recorded. It's off until you turn it on.
++            </div>
++            <div class="gpa-row" style="margin-top:6px;">
++              <input id="gpa-tele-bin" class="gpa-input" placeholder="Shared Bin ID (logs)" autocomplete="off" />
++            </div>
++            <div class="gpa-row">
++              <input id="gpa-tele-key" class="gpa-input" type="password" placeholder="X-Master-Key for that bin" autocomplete="off" />
++            </div>
++            <div class="gpa-row" style="flex-wrap:wrap;">
++              <button id="gpa-tele-toggle" class="gpa-btn" style="flex:1;">Telemetry: OFF</button>
++              <button id="gpa-tele-pull" class="gpa-btn" style="flex:1;">⬇ Pull remote logs</button>
++            </div>
++            <div id="gpa-tele-msg" class="gpa-sub" style="margin-top:4px;"></div>
++          </div>
++
++          <!-- Power tools -->
++          <div class="gpa-admin-pane" data-apane="tools">
++            <div class="gpa-sub" style="margin:4px 0 4px;">Model override (both providers)</div>
++            <div class="gpa-row">
++              <input id="gpa-adm-model" class="gpa-input" placeholder="e.g. gpt-4o, gemini-2.0-flash — blank = default" autocomplete="off" />
++            </div>
++            <div class="gpa-sub" style="margin:12px 0 4px;">System-prompt prefix (prepended to every AI call)</div>
++            <textarea id="gpa-adm-sysprefix" class="gpa-sync-box" style="height:70px;" placeholder="Extra standing instructions for the AI on every request…"></textarea>
++            <div class="gpa-row" style="margin-top:8px;">
++              <label class="gpa-sub" style="flex:1;">Max page characters sent</label>
++              <input id="gpa-adm-maxchars" class="gpa-input" type="number" min="1000" max="200000" step="1000" style="max-width:120px;" />
++            </div>
++            <div class="gpa-row" style="margin-top:8px;">
++              <label class="gpa-sub" style="flex:1;">Temperature (OpenAI, 0–2)</label>
++              <input id="gpa-adm-temp" class="gpa-input" type="number" min="0" max="2" step="0.1" style="max-width:120px;" placeholder="default" />
++            </div>
++            <div class="gpa-row" style="margin-top:10px; flex-wrap:wrap;">
++              <button id="gpa-adm-save-tools" class="gpa-btn primary" style="flex:1;">Save power settings</button>
++              <button id="gpa-adm-reset-tools" class="gpa-btn" style="flex:1;">Reset to defaults</button>
++            </div>
++            <div class="gpa-sub" style="margin:16px 0 4px;">Raw AI playground</div>
++            <textarea id="gpa-adm-play-sys" class="gpa-sync-box" style="height:50px;" placeholder="System prompt (optional)"></textarea>
++            <textarea id="gpa-adm-play-user" class="gpa-sync-box" style="height:60px;" placeholder="User message — send straight to the model, bypassing all the panel's own prompts"></textarea>
++            <div class="gpa-row">
++              <button id="gpa-adm-play-run" class="gpa-btn primary" style="flex:1;">▶ Run raw prompt</button>
++            </div>
++            <div id="gpa-adm-play-out" class="gpa-admin-log" style="margin-top:6px;"></div>
++            <div id="gpa-adm-tools-msg" class="gpa-sub" style="margin-top:4px;"></div>
++          </div>
++
++          <!-- Data -->
++          <div class="gpa-admin-pane" data-apane="data">
++            <div class="gpa-sub" style="margin:4px 0 4px;">Every gpa_* value in this browser (editable)</div>
++            <div id="gpa-adm-ls" class="gpa-admin-ls"></div>
++            <div class="gpa-row" style="margin-top:8px; flex-wrap:wrap;">
++              <button id="gpa-adm-ls-refresh" class="gpa-btn" style="flex:1;">↻ Refresh</button>
++              <button id="gpa-adm-dump" class="gpa-btn" style="flex:1;">⬇ Export everything</button>
++              <button id="gpa-adm-wipe" class="gpa-btn" style="flex:1;">💥 Wipe all data</button>
++            </div>
++            <div id="gpa-adm-data-msg" class="gpa-sub" style="margin-top:4px;"></div>
++          </div>
++        </div>
+       </div>
+     </div>
+   `;
+@@ -1233,6 +1326,45 @@
+         font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, 'Courier New', monospace;
+       }
+       .gpa-sync-box:focus { border-color: ${t.accent}; }
++      /* ---- Admin console ---- */
++      .gpa-admin-title { font-weight: 700; color: ${t.accent}; }
++      .gpa-admin-note {
++        font-size: 10px; line-height: 1.5; color: ${t.sub}; margin: 8px 0;
++        padding: 7px 9px; background: ${t.field}; border: 1px solid ${t.border};
++        border-radius: 6px;
++      }
++      .gpa-admin-tabs { display: flex; gap: 5px; margin: 10px 0 8px; flex-wrap: wrap; }
++      .gpa-admin-tab { font-size: 10px; padding: 4px 9px; }
++      .gpa-admin-pane { display: none; }
++      .gpa-admin-pane.active { display: block; }
++      .gpa-admin-stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
++      .gpa-admin-statcard {
++        padding: 8px 10px; background: ${t.field}; border: 1px solid ${t.border};
++        border-radius: 7px; text-align: center;
++      }
++      .gpa-admin-statcard .n { font-size: 18px; font-weight: 800; color: ${t.accent}; display: block; }
++      .gpa-admin-statcard .l { font-size: 9px; color: ${t.sub}; margin-top: 2px; }
++      .gpa-admin-users, .gpa-admin-log, .gpa-admin-ls {
++        max-height: 190px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px;
++      }
++      .gpa-admin-userrow, .gpa-admin-logrow {
++        display: flex; justify-content: space-between; gap: 8px; align-items: baseline;
++        padding: 5px 8px; background: ${t.field}; border: 1px solid ${t.border};
++        border-radius: 5px; font-size: 10px;
++        font-family: 'JetBrains Mono', ui-monospace, monospace;
++      }
++      .gpa-admin-userrow b { color: ${t.accent}; font-weight: 700; }
++      .gpa-admin-logrow .t { color: ${t.sub}; white-space: nowrap; }
++      .gpa-admin-logrow .ev { flex: 1; overflow-wrap: anywhere; }
++      .gpa-admin-ls-row { display: flex; flex-direction: column; gap: 3px; padding: 6px 8px;
++        background: ${t.field}; border: 1px solid ${t.border}; border-radius: 5px; }
++      .gpa-admin-ls-row .k { font-size: 9.5px; color: ${t.accent}; font-weight: 700; overflow-wrap: anywhere; }
++      .gpa-admin-ls-row textarea {
++        width: 100%; min-height: 34px; background: ${t.panel}; color: ${t.text};
++        border: 1px solid ${t.border}; border-radius: 4px; font-size: 9px; padding: 4px;
++        font-family: 'JetBrains Mono', ui-monospace, monospace; resize: vertical;
++      }
++      .gpa-admin-ls-row .gpa-btn { align-self: flex-end; font-size: 9px; padding: 2px 7px; }
+       .gpa-pause-stats { display: flex; flex-direction: column; gap: 5px; }
+       .gpa-pause-stat {
+         display: flex; justify-content: space-between; align-items: center; gap: 10px;
+@@ -2057,6 +2189,31 @@
+     }
+   }
+ 
++  // ---- Admin overrides ------------------------------------------------------
++  // The admin console (unlocked with a PIN, see far below) can override a few
++  // engine settings. They live in their own localStorage keys, kept out of
++  // profile snapshots so they're device-global and survive sign-in/sign-out.
++  // Honest note: the PIN and these keys are all client-side. Anyone who reads
++  // this file sees the PIN, and anyone with DevTools can read/write these keys.
++  // This is a soft lock and a personal dashboard, not real access control.
++  const ADMIN_PIN = '1029';
++  const ADMIN_KEYS = {
++    MODEL: 'gpa_admin_model',
++    SYSPREFIX: 'gpa_admin_sysprefix',
++    MAXCHARS: 'gpa_admin_maxchars',
++    TEMP: 'gpa_admin_temp',
++    LOGS: 'gpa_admin_logs',
++    TELE_ON: 'gpa_admin_tele_on',
++    TELE_BIN: 'gpa_admin_tele_bin',
++    TELE_KEY: 'gpa_admin_tele_key',
++    TELE_NOTICE_SEEN: 'gpa_tele_notice_seen'
++  };
++  function admGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
++  function effectiveModel(dflt) { const m = (admGet(ADMIN_KEYS.MODEL) || '').trim(); return m || dflt; }
++  function effectiveMaxPageChars() { const n = parseInt(admGet(ADMIN_KEYS.MAXCHARS), 10); return (n && n >= 1000) ? n : MAX_PAGE_CHARS; }
++  function effectiveTemp() { const v = parseFloat(admGet(ADMIN_KEYS.TEMP)); return isNaN(v) ? null : Math.max(0, Math.min(2, v)); }
++  function adminSysPrefix() { const p = (admGet(ADMIN_KEYS.SYSPREFIX) || '').trim(); return p ? p + '\n\n' : ''; }
++
+   // ---- Gemini API helpers -----------------------------------------------
+   function getApiKey() {
+     let key = sanitizeKey(API_KEY_DEFAULT) || readStoredKey(STORAGE_KEY);
+@@ -2084,7 +2241,7 @@
+     const body = { contents: [{ role: 'user', parts }] };
+     if (systemText) body.systemInstruction = { parts: [{ text: systemText }] };
+ 
+-    const res = await rawFetch(`${API_BASE}${MODEL}:generateContent?key=${key}`, {
++    const res = await rawFetch(`${API_BASE}${effectiveModel(MODEL)}:generateContent?key=${key}`, {
+       method: 'POST',
+       headers: { 'Content-Type': 'application/json' },
+       body: JSON.stringify(body)
+@@ -2301,6 +2458,10 @@
+       ? `${OPENAI_PROXY}/v1/chat/completions`
+       : 'https://api.openai.com/v1/chat/completions';
+ 
++    payload.model = effectiveModel(OPENAI_MODEL);
++    const temp = effectiveTemp();
++    if (temp !== null) payload.temperature = temp;
++
+     const res = await rawFetch(endpoint, {
+       method: 'POST',
+       headers,
+@@ -2352,11 +2513,10 @@
+   // Dispatches to whichever provider is selected in the Theme tab.
+   async function callAI(userText, systemText, imageDataUrls) {
+     const provider = localStorage.getItem(PROVIDER_KEY) || 'gemini';
+-    // Memory goes in FRONT of the caller's system text, never behind it: the
+-    // JSON-only response rules several callers rely on have to be the last
+-    // word, or the model starts narrating what it remembered.
+-    const memory = buildContextMemory();
+-    const sys = memory ? memory + (systemText || '') : systemText;
++    // Order matters: admin standing instructions, then saved context, then the
++    // caller's own system text LAST — the JSON-only rules several callers rely
++    // on have to be the final word, or the model narrates instead of obeying.
++    const sys = adminSysPrefix() + buildContextMemory() + (systemText || '');
+     return provider === 'openai'
+       ? callOpenAI(userText, sys, imageDataUrls)
+       : callGemini(userText, sys, imageDataUrls);
+@@ -3549,7 +3709,8 @@
+     clone.querySelectorAll('script,style,noscript,svg,canvas,iframe').forEach((el) => el.remove());
+     let text = clone.innerText || clone.textContent || '';
+     text = text.replace(/\n{3,}/g, '\n\n').trim();
+-    if (text.length > MAX_PAGE_CHARS) text = text.slice(0, MAX_PAGE_CHARS) + '\n\n[...truncated...]';
++    const cap = effectiveMaxPageChars();
++    if (text.length > cap) text = text.slice(0, cap) + '\n\n[...truncated...]';
+     return text;
+   }
+ 
+@@ -4868,7 +5029,15 @@
+   const CLOUD_SECRET_KEY = 'gpa_cloud_key';
+   // Keys that identify the session/profiles themselves must never be swept
+   // into a profile snapshot, or restoring one would clobber the login system.
+-  const NON_PROFILE_KEYS = [SESSION_KEY, CLOUD_BIN_KEY, CLOUD_SECRET_KEY];
++  // The admin keys and the usage log are device-global on purpose: they belong
++  // to this browser/owner, not to whichever profile happens to be signed in,
++  // so restoring a profile must leave them untouched.
++  const NON_PROFILE_KEYS = [
++    SESSION_KEY, CLOUD_BIN_KEY, CLOUD_SECRET_KEY,
++    ADMIN_KEYS.MODEL, ADMIN_KEYS.SYSPREFIX, ADMIN_KEYS.MAXCHARS, ADMIN_KEYS.TEMP,
++    ADMIN_KEYS.LOGS, ADMIN_KEYS.TELE_ON, ADMIN_KEYS.TELE_BIN, ADMIN_KEYS.TELE_KEY,
++    ADMIN_KEYS.TELE_NOTICE_SEEN
++  ];
+ 
+   const loginOverlay = panel.querySelector('#gpa-login');
+   const loginUserInput = panel.querySelector('#gpa-login-user');
+@@ -4994,6 +5163,10 @@
+   function enterApp(user) {
+     currentUser = user;
+     localStorage.setItem(SESSION_KEY, user);
++    // Record the open in the local usage log, and mirror it to the shared
++    // telemetry bin if the owner turned that on. Wrapped so a logging hiccup
++    // can never block a sign-in.
++    try { logUsageEvent('open', user); } catch (e) { /* logging is best-effort */ }
+     loginOverlay.style.display = 'none';
+     setLockedChrome(false);
+     refreshAccountUI();
+@@ -7395,6 +7568,339 @@
+     }
+   });
+ 
++  // ---- Usage logging --------------------------------------------------------
++  // A record of who opened the tool and when. Local by default: it only ever
++  // sees THIS browser, because localStorage is per-origin per-device and no
++  // other instance can reach it. Cross-device visibility needs the telemetry
++  // bin below. Entries: u=username, ev=event, ts=time, url, host, ua.
++  const LOG_CAP = 400; // keep the newest N; the log is not an archive
++
++  function readLogs() {
++    try { const a = JSON.parse(localStorage.getItem(ADMIN_KEYS.LOGS) || '[]'); return Array.isArray(a) ? a : []; }
++    catch (e) { return []; }
++  }
++  function writeLogs(arr) {
++    try { localStorage.setItem(ADMIN_KEYS.LOGS, JSON.stringify(arr.slice(-LOG_CAP))); } catch (e) { /* quota */ }
++  }
++  function logUsageEvent(ev, user) {
++    const entry = {
++      u: user || currentUser || '(anonymous)',
++      ev,
++      ts: Date.now(),
++      url: location.href.slice(0, 300),
++      host: location.hostname,
++      ua: (navigator.userAgent || '').slice(0, 160)
++    };
++    const arr = readLogs();
++    arr.push(entry);
++    writeLogs(arr);
++    maybePushTelemetry(entry);
++    maybeShowTelemetryNotice();
++  }
++
++  // ---- Cross-device telemetry (opt-in, disclosed) ---------------------------
++  // Sends each open to a shared JSONBin the owner configures, so opens from
++  // OTHER people's devices land somewhere the owner can read. Read-modify-write
++  // (JSONBin holds one record per bin). Fire-and-forget: a failed push must
++  // never disrupt the person using the tool.
++  function telemetryOn() { return admGet(ADMIN_KEYS.TELE_ON) === 'on'; }
++  function telemetryCreds() {
++    return { bin: (admGet(ADMIN_KEYS.TELE_BIN) || '').trim(), key: (admGet(ADMIN_KEYS.TELE_KEY) || '').trim() };
++  }
++  async function maybePushTelemetry(entry) {
++    if (!telemetryOn()) return;
++    const { bin, key } = telemetryCreds();
++    if (!bin || !key) return;
++    try {
++      const cur = await fetch(`https://api.jsonbin.io/v3/b/${encodeURIComponent(bin)}/latest`, {
++        headers: { 'X-Master-Key': key }
++      }).then((r) => r.ok ? r.json() : null).catch(() => null);
++      const rec = (cur && (cur.record || cur)) || {};
++      const logs = Array.isArray(rec.logs) ? rec.logs : [];
++      logs.push(entry);
++      await fetch(`https://api.jsonbin.io/v3/b/${encodeURIComponent(bin)}`, {
++        method: 'PUT',
++        headers: { 'Content-Type': 'application/json', 'X-Master-Key': key },
++        body: JSON.stringify({ logs: logs.slice(-2000) })
++      });
++    } catch (e) { /* telemetry is best-effort and must never surface to the user */ }
++  }
++
++  // The disclosure the end user sees. Shown once per browser when telemetry is
++  // active — the difference between analytics and covert tracking is that the
++  // people being logged are told. Deliberately not removable by config.
++  function maybeShowTelemetryNotice() {
++    if (!telemetryOn()) return;
++    if (admGet(ADMIN_KEYS.TELE_NOTICE_SEEN) === 'yes') return;
++    try { localStorage.setItem(ADMIN_KEYS.TELE_NOTICE_SEEN, 'yes'); } catch (e) { /* ignore */ }
++    const t = THEMES[theme] || THEMES.dark;
++    const toast = document.createElement('div');
++    toast.style.cssText = `position:fixed;left:12px;bottom:12px;z-index:2147483647;max-width:320px;
++      background:${t.panel};color:${t.text};border:1px solid ${t.accent};border-radius:10px;
++      padding:11px 13px;font:11px/1.5 ui-monospace,monospace;box-shadow:0 8px 26px rgba(0,0,0,0.5);`;
++    toast.textContent = 'Heads up: this assistant records basic usage (the profile name you sign in with and when you open it) for its owner. Nothing you type is sent.';
++    const ok = document.createElement('button');
++    ok.textContent = 'OK';
++    ok.style.cssText = `display:block;margin-top:8px;margin-left:auto;font:11px/1 inherit;
++      padding:4px 12px;border-radius:6px;cursor:pointer;background:transparent;color:${t.text};border:1px solid ${t.accent};`;
++    ok.addEventListener('click', () => toast.remove());
++    toast.appendChild(ok);
++    document.body.appendChild(toast);
++    setTimeout(() => { if (toast.parentNode) toast.remove(); }, 15000);
++  }
++
++  // ---- Admin console --------------------------------------------------------
++  (function adminConsole() {
++    const adminBox = panel.querySelector('#gpa-admin');
++    const heading = panel.querySelector('#gpa-account-heading');
++    if (!adminBox || !heading) return;
++    let adminUnlocked = false;   // resets every injection — PIN is required each session
++
++    // Reality check shown inside the panel, so the owner is never misled about
++    // what this actually protects.
++    const reality = panel.querySelector('#gpa-admin-reality');
++    if (reality) {
++      reality.className = 'gpa-admin-note';
++      reality.textContent = 'Reality check: this PIN and every setting here live in your browser. '
++        + 'Anyone who reads the script source can see the PIN, and anyone with DevTools can open this. '
++        + 'Treat it as a personal dashboard and a soft lock — not real security. Do not put anything truly sensitive behind it.';
++    }
++
++    // ---- Hidden trigger: five quick clicks on the "Account & sync" heading ----
++    let clicks = 0, clickTimer = null;
++    heading.addEventListener('click', () => {
++      if (adminUnlocked) return;
++      clicks++;
++      clearTimeout(clickTimer);
++      clickTimer = setTimeout(() => { clicks = 0; }, 1200);
++      if (clicks >= 5) {
++        clicks = 0;
++        const pin = prompt('Enter admin PIN:');
++        if (pin === null) return;
++        if (pin.trim() === ADMIN_PIN) { adminUnlocked = true; openAdmin(); }
++        else alert('Incorrect PIN.');
++      }
++    });
++
++    function openAdmin() {
++      adminBox.style.display = 'block';
++      loadPowerToolFields();
++      loadTelemetryFields();
++      renderUsage();
++      adminBox.scrollIntoView({ behavior: 'smooth', block: 'start' });
++    }
++    panel.querySelector('#gpa-admin-lock').addEventListener('click', () => {
++      adminUnlocked = false;
++      adminBox.style.display = 'none';
++    });
++
++    // ---- Admin tab switching ----
++    adminBox.querySelectorAll('.gpa-admin-tab').forEach((tab) => {
++      tab.addEventListener('click', () => {
++        adminBox.querySelectorAll('.gpa-admin-tab').forEach((x) => x.classList.toggle('primary', x === tab));
++        const name = tab.dataset.atab;
++        adminBox.querySelectorAll('.gpa-admin-pane').forEach((p) => p.classList.toggle('active', p.dataset.apane === name));
++        if (name === 'usage') renderUsage();
++        if (name === 'data') renderLsEditor();
++      });
++    });
++
++    // ---- Usage pane ----
++    function fmtTime(ts) { return new Date(ts).toLocaleString(); }
++    function renderUsage() {
++      const logs = readLogs();
++      const opens = logs.filter((l) => l.ev === 'open');
++      const users = {};
++      opens.forEach((l) => {
++        const u = l.u || '(anonymous)';
++        if (!users[u]) users[u] = { count: 0, first: l.ts, last: l.ts };
++        users[u].count++;
++        users[u].first = Math.min(users[u].first, l.ts);
++        users[u].last = Math.max(users[u].last, l.ts);
++      });
++      const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
++      const todayOpens = opens.filter((l) => l.ts >= startOfDay.getTime()).length;
++
++      const stats = [
++        { n: opens.length, l: 'Total opens' },
++        { n: Object.keys(users).length, l: 'Unique users' },
++        { n: todayOpens, l: 'Opens today' },
++        { n: logs.length, l: 'Log entries' }
++      ];
++      panel.querySelector('#gpa-admin-stats').innerHTML = stats.map((s) =>
++        `<div class="gpa-admin-statcard"><span class="n">${s.n}</span><div class="l">${escapeHtml(s.l)}</div></div>`).join('');
++
++      const userRows = Object.keys(users).sort((a, b) => users[b].last - users[a].last).map((u) => {
++        const info = users[u];
++        return `<div class="gpa-admin-userrow"><b>${escapeHtml(u)}</b>`
++          + `<span>${info.count}× · last ${escapeHtml(fmtTime(info.last))}</span></div>`;
++      }).join('');
++      panel.querySelector('#gpa-admin-users').innerHTML = userRows || '<div class="gpa-sub">No sign-ins recorded on this browser yet.</div>';
++
++      const logRows = logs.slice().reverse().slice(0, 120).map((l) =>
++        `<div class="gpa-admin-logrow"><span class="ev"><b>${escapeHtml(l.u || '?')}</b> · ${escapeHtml(l.ev)} · ${escapeHtml(l.host || '')}</span>`
++        + `<span class="t">${escapeHtml(fmtTime(l.ts))}</span></div>`).join('');
++      panel.querySelector('#gpa-admin-log').innerHTML = logRows || '<div class="gpa-sub">Nothing logged yet.</div>';
++    }
++    panel.querySelector('#gpa-admin-refresh').addEventListener('click', renderUsage);
++    panel.querySelector('#gpa-admin-clear-logs').addEventListener('click', () => {
++      if (!confirm('Clear the local usage log on this browser? (Remote telemetry logs are not affected.)')) return;
++      writeLogs([]);
++      renderUsage();
++    });
++    panel.querySelector('#gpa-admin-export-logs').addEventListener('click', () => {
++      const blob = JSON.stringify(readLogs(), null, 2);
++      navigator.clipboard.writeText(blob).then(
++        () => alert('Usage log copied to clipboard as JSON.'),
++        () => { const w = window.open('', '_blank'); if (w) w.document.write('<pre>' + escapeHtml(blob) + '</pre>'); }
++      );
++    });
++
++    // ---- Telemetry controls ----
++    const teleBin = panel.querySelector('#gpa-tele-bin');
++    const teleKey = panel.querySelector('#gpa-tele-key');
++    const teleToggle = panel.querySelector('#gpa-tele-toggle');
++    const teleMsg = panel.querySelector('#gpa-tele-msg');
++    function loadTelemetryFields() {
++      teleBin.value = admGet(ADMIN_KEYS.TELE_BIN) || '';
++      teleKey.value = admGet(ADMIN_KEYS.TELE_KEY) || '';
++      teleToggle.textContent = telemetryOn() ? 'Telemetry: ON' : 'Telemetry: OFF';
++      teleToggle.classList.toggle('primary', telemetryOn());
++    }
++    function saveTeleCreds() {
++      localStorage.setItem(ADMIN_KEYS.TELE_BIN, teleBin.value.trim());
++      localStorage.setItem(ADMIN_KEYS.TELE_KEY, teleKey.value.trim());
++    }
++    teleBin.addEventListener('change', saveTeleCreds);
++    teleKey.addEventListener('change', saveTeleCreds);
++    teleToggle.addEventListener('click', () => {
++      saveTeleCreds();
++      const turningOn = !telemetryOn();
++      if (turningOn && (!teleBin.value.trim() || !teleKey.value.trim())) {
++        teleMsg.textContent = 'Add a shared Bin ID and its master key first.';
++        return;
++      }
++      localStorage.setItem(ADMIN_KEYS.TELE_ON, turningOn ? 'on' : 'off');
++      // Re-arm the end-user notice each time it's switched on, so people are
++      // told again after any pause in collection.
++      if (turningOn) localStorage.removeItem(ADMIN_KEYS.TELE_NOTICE_SEEN);
++      loadTelemetryFields();
++      teleMsg.textContent = turningOn
++        ? 'On. Opens from every device pointed at this bin will collect here. Users see a one-time notice.'
++        : 'Off. Only this browser is logged now.';
++    });
++    panel.querySelector('#gpa-tele-pull').addEventListener('click', async () => {
++      saveTeleCreds();
++      const bin = teleBin.value.trim(), key = teleKey.value.trim();
++      if (!bin || !key) { teleMsg.textContent = 'Add a shared Bin ID and its master key first.'; return; }
++      teleMsg.textContent = 'Pulling…';
++      try {
++        const json = await fetch(`https://api.jsonbin.io/v3/b/${encodeURIComponent(bin)}/latest`, {
++          headers: { 'X-Master-Key': key }
++        }).then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
++        const rec = (json && (json.record || json)) || {};
++        const remote = Array.isArray(rec.logs) ? rec.logs : [];
++        // Merge remote into the local view, de-duped by user+event+timestamp.
++        const seen = new Set(readLogs().map((l) => l.u + '|' + l.ev + '|' + l.ts));
++        const merged = readLogs();
++        remote.forEach((l) => { const id = l.u + '|' + l.ev + '|' + l.ts; if (!seen.has(id)) { seen.add(id); merged.push(l); } });
++        merged.sort((a, b) => a.ts - b.ts);
++        writeLogs(merged);
++        renderUsage();
++        teleMsg.textContent = `Pulled ${remote.length} remote entr${remote.length === 1 ? 'y' : 'ies'}.`;
++      } catch (e) {
++        teleMsg.textContent = 'Pull failed: ' + e.message;
++      }
++    });
++
++    // ---- Power tools ----
++    function loadPowerToolFields() {
++      panel.querySelector('#gpa-adm-model').value = admGet(ADMIN_KEYS.MODEL) || '';
++      panel.querySelector('#gpa-adm-sysprefix').value = admGet(ADMIN_KEYS.SYSPREFIX) || '';
++      panel.querySelector('#gpa-adm-maxchars').value = admGet(ADMIN_KEYS.MAXCHARS) || String(MAX_PAGE_CHARS);
++      panel.querySelector('#gpa-adm-temp').value = admGet(ADMIN_KEYS.TEMP) || '';
++    }
++    panel.querySelector('#gpa-adm-save-tools').addEventListener('click', () => {
++      const set = (k, v) => { v = String(v).trim(); if (v) localStorage.setItem(k, v); else localStorage.removeItem(k); };
++      set(ADMIN_KEYS.MODEL, panel.querySelector('#gpa-adm-model').value);
++      set(ADMIN_KEYS.SYSPREFIX, panel.querySelector('#gpa-adm-sysprefix').value);
++      set(ADMIN_KEYS.MAXCHARS, panel.querySelector('#gpa-adm-maxchars').value);
++      set(ADMIN_KEYS.TEMP, panel.querySelector('#gpa-adm-temp').value);
++      panel.querySelector('#gpa-adm-tools-msg').textContent = 'Saved. Applies to the next AI request.';
++    });
++    panel.querySelector('#gpa-adm-reset-tools').addEventListener('click', () => {
++      [ADMIN_KEYS.MODEL, ADMIN_KEYS.SYSPREFIX, ADMIN_KEYS.MAXCHARS, ADMIN_KEYS.TEMP].forEach((k) => localStorage.removeItem(k));
++      loadPowerToolFields();
++      panel.querySelector('#gpa-adm-tools-msg').textContent = 'Reset to defaults.';
++    });
++    panel.querySelector('#gpa-adm-play-run').addEventListener('click', async () => {
++      const out = panel.querySelector('#gpa-adm-play-out');
++      const userMsg = panel.querySelector('#gpa-adm-play-user').value.trim();
++      const sysMsg = panel.querySelector('#gpa-adm-play-sys').value.trim();
++      if (!userMsg) { out.textContent = 'Type a user message first.'; return; }
++      out.textContent = 'Running…';
++      try {
++        // Straight to the provider — but callAI still prepends admin prefix and
++        // any saved context, which is usually what a power user wants to test.
++        const res = await callAI(userMsg, sysMsg || undefined);
++        out.textContent = res;
++      } catch (e) {
++        out.textContent = 'Error: ' + ((e && e.message) || e);
++      }
++    });
++
++    // ---- Data pane: localStorage inspector ----
++    function renderLsEditor() {
++      const wrap = panel.querySelector('#gpa-adm-ls');
++      wrap.innerHTML = '';
++      const keys = [];
++      for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith('gpa_')) keys.push(k); }
++      keys.sort();
++      if (!keys.length) { wrap.innerHTML = '<div class="gpa-sub">No gpa_ keys stored.</div>'; return; }
++      keys.forEach((k) => {
++        const row = document.createElement('div');
++        row.className = 'gpa-admin-ls-row';
++        const kEl = document.createElement('div');
++        kEl.className = 'k';
++        kEl.textContent = k;
++        const ta = document.createElement('textarea');
++        ta.value = localStorage.getItem(k) || '';
++        const rowBtns = document.createElement('div');
++        rowBtns.style.cssText = 'display:flex;gap:6px;justify-content:flex-end;';
++        const save = document.createElement('button');
++        save.className = 'gpa-btn';
++        save.textContent = 'Save';
++        save.addEventListener('click', () => { localStorage.setItem(k, ta.value); save.textContent = '✓'; setTimeout(() => (save.textContent = 'Save'), 800); });
++        const del = document.createElement('button');
++        del.className = 'gpa-btn';
++        del.textContent = 'Delete';
++        del.addEventListener('click', () => { if (confirm('Delete ' + k + '?')) { localStorage.removeItem(k); renderLsEditor(); } });
++        rowBtns.appendChild(save); rowBtns.appendChild(del);
++        row.appendChild(kEl); row.appendChild(ta); row.appendChild(rowBtns);
++        wrap.appendChild(row);
++      });
++    }
++    panel.querySelector('#gpa-adm-ls-refresh').addEventListener('click', renderLsEditor);
++    panel.querySelector('#gpa-adm-dump').addEventListener('click', () => {
++      const dump = {};
++      for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith('gpa_')) dump[k] = localStorage.getItem(k); }
++      const blob = JSON.stringify(dump, null, 2);
++      navigator.clipboard.writeText(blob).then(
++        () => { panel.querySelector('#gpa-adm-data-msg').textContent = 'All gpa_ data copied to clipboard.'; },
++        () => { const w = window.open('', '_blank'); if (w) w.document.write('<pre>' + escapeHtml(blob) + '</pre>'); }
++      );
++    });
++    panel.querySelector('#gpa-adm-wipe').addEventListener('click', () => {
++      if (!confirm('Wipe ALL of this tool\'s data on this browser — profiles, settings, logs, keys? This cannot be undone.')) return;
++      if (!confirm('Really wipe everything? Last chance.')) return;
++      const keys = [];
++      for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith('gpa_')) keys.push(k); }
++      keys.forEach((k) => localStorage.removeItem(k));
++      panel.querySelector('#gpa-adm-data-msg').textContent = 'Wiped. Reload the tool to start fresh.';
++      renderLsEditor();
++    });
++  })();
++
+   // ---- Session restore on load ----
+   // If this browser already had someone signed in, skip straight back in.
+   (function restoreSession() {
+-- 
+2.43.0
+
+
+From d8bf6a0a46b8913d55527be2258946dec354b7d1 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sun, 13 Sep 2026 20:23:14 +0000
+Subject: [PATCH 5/6] Rebuild telemetry on the Cloudflare Worker with live
+ presence
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Replaces the shared-JSONBin approach (whose master key had to ship in the
+public client, so anyone could read or wipe the logs) with a proper
+worker-backed design:
+
+Worker (KV-backed):
+- POST /track stores a heartbeat: a short-TTL session:<sid> key for
+  presence, and a user:<name> rollup refreshed on 'open'. Coarse geo
+  (Cloudflare country/region) is kept, never a raw IP.
+- GET /admin/summary returns active-now (sessions still within TTL,
+  collapsed per user) plus all-time users, but ONLY to a request whose
+  ?token= matches env.ADMIN_TOKEN. That server-side check is the real,
+  owner-only access control — no secret is exposed to the browser.
+- POST /admin/clear wipes logs (same token gate).
+- Degrades cleanly: no KV bound -> /track no-ops; no ADMIN_TOKEN ->
+  admin endpoints return a helpful 500; the OpenAI proxy and /read are
+  untouched.
+
+Client:
+- Every instance heartbeats to /track on open and every 45s while signed
+  in (text/plain body = no CORS preflight, keepalive for the unload
+  beat). Controlled by a top-level TELEMETRY_ENABLED constant.
+- Admin console Usage tab gains a Live view: an "active right now" count,
+  the active users with host/region/last-seen, and all-time users with
+  open counts, plus auto-refresh. Admin token is entered once and kept on
+  the owner's device only.
+- One-time end-user disclosure notice retained.
+
+Tested: worker handlers against a mock KV (track, token auth, presence
+expiry, per-open counting, clear, graceful degradation, proxy intact);
+client heartbeat payload and live view rendering in Chromium against a
+mocked worker, including the wrong-token error path and the disclosure
+notice.
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_019GqTQm8E1znRkM37YVj6K7
+---
+ README.md |  16 +++-
+ script.js | 230 +++++++++++++++++++++++++++++++++---------------------
+ worker.js | 101 +++++++++++++++++++++++-
+ 3 files changed, 257 insertions(+), 90 deletions(-)
+
+diff --git a/README.md b/README.md
+index c56d3cc..ed2d146 100644
+--- a/README.md
++++ b/README.md
+@@ -100,7 +100,19 @@ A hidden owner dashboard in Settings. To open it: click the **Account & sync** h
+ 
+ *This is a soft lock, not security.* The PIN lives in the script, which is public — anyone who reads the source sees `1029` — and every "admin-only" value sits in the same `localStorage` any visitor can open in DevTools. It keeps a casual user out of the dashboard; it does not protect anything. Don't put anything genuinely sensitive behind it.
+ 
+-*Seeing other people needs a server, and honesty.* Because `localStorage` is per-browser, the local log only ever shows *this* browser — your own opens. To see opens from other people's devices, the Usage tab has optional **cross-device telemetry**: point every copy at one shared JSONBin and opens collect there. It's off until you turn it on, and when it's on, anyone who opens the tool sees a one-time notice that usage is recorded (the profile name and open times — never what they type). That notice is deliberately not removable from the settings: logging people who know they're logged is analytics; logging people who don't is spyware, and the second one isn't something this builds. Note too that the shared bin's key has to ship inside the script, so those remote logs are low-security by nature — anyone with the tool can read or clear them.
++*Seeing other people is real now — through your worker.* Because `localStorage` is per-browser, the local log only shows *this* browser. To see everyone — including who's **active right now** — every instance sends a small heartbeat to your Cloudflare Worker's `/track` endpoint, and the Usage tab's **Live** view reads it back. This is proper analytics: the data lives server-side in your Worker's KV store, and the Worker only returns it to a request carrying your `ADMIN_TOKEN`, so the logs are genuinely owner-only and **no secret ships in the public script**. Setup is below. When telemetry is on, every user sees a one-time notice that usage is recorded (their profile name, open times, and coarse location — country/region from Cloudflare, never a raw IP or anything they type). That notice is deliberately not removable: logging people who know they're logged is analytics; logging people who don't is spyware, and the second one isn't something this builds. Turn it all off by setting `TELEMETRY_ENABLED = false` near the top of `script.js`.
++
++#### Setting up live telemetry
++
++In the Cloudflare dashboard, on the same Worker you deploy `worker.js` to:
++
++1. **Create a KV namespace.** Storage & Databases → KV → Create → name it anything (e.g. `agent_console_logs`).
++2. **Bind it to the Worker as `TELEMETRY`.** Worker → Settings → Variables and Secrets → KV Namespace Bindings → Add: variable name `TELEMETRY`, and pick the namespace you made. The name `TELEMETRY` must match exactly.
++3. **Set your admin secret.** Same Settings page → Environment Variables → add `ADMIN_TOKEN` with a long random value. Use "Encrypt" so it's a secret. This is the password that unlocks the Live view; keep it to yourself.
++4. **Deploy the updated `worker.js`.**
++5. In the admin console → Usage → Live, paste that same `ADMIN_TOKEN` value into the token field (it's stored only on your device) and press **Load live users**. Turn on Auto-refresh to watch it live.
++
++Until KV and `ADMIN_TOKEN` are set, `/track` just no-ops and the Live view tells you what's missing — the OpenAI proxy and everything else keep working regardless. Cloudflare's free tier covers a KV namespace and comfortably handles a personal-scale user base; heartbeats are throttled (presence refresh every 45s, all-time rollup only on open) to stay well inside the free write limits.
+ 
+ ### Browser
+ A plain iframe with a URL bar. It only loads sites that allow being embedded — banks, most social apps, and SoundCloud's own site set `X-Frame-Options` or CSP `frame-ancestors` to prevent it. That's a protection those sites deliberately set, and this script makes no attempt to circumvent it.
+@@ -133,6 +145,8 @@ An optional Cloudflare Worker that does two small things the browser can't do on
+ 
+ - **`/v1/*`** — forwards to `api.openai.com` and adds the CORS header. Direct browser → OpenAI calls are frequently blocked by ad blockers, antivirus shields, and network filters, which surface as confusing CORS errors. It also answers `OPTIONS` preflights itself, because forwarding those upstream returns a response that doesn't allow the `Authorization` header, which makes the browser block the real request.
+ - **`/read?url=…`** — fetches a page server-side and returns its HTML, so research mode can read sources the browser isn't allowed to fetch cross-origin. HTML and plain text only, capped at 3MB.
++- **`/track`** — receives usage heartbeats and stores them in the `TELEMETRY` KV namespace (a short-TTL session key for presence, a per-user rollup on open). No-ops if KV isn't bound.
++- **`/admin/summary`** and **`/admin/clear`** — return or wipe the usage logs, but only for a request whose `?token=` matches the Worker's `ADMIN_TOKEN` env var. This is where the owner-only access control actually lives.
+ 
+ ### Deploying it
+ 
+diff --git a/script.js b/script.js
+index 2b8df87..31ae3f8 100644
+--- a/script.js
++++ b/script.js
+@@ -97,6 +97,14 @@
+   // avoids that: it forwards to api.openai.com and adds the CORS header.
+   // Set to '' to call OpenAI directly.
+   const OPENAI_PROXY = 'https://donnajbe.viztrrx.workers.dev';
++  // ---- Usage telemetry ----
++  // Every instance sends a small heartbeat to the worker's /track endpoint so
++  // the owner can see who's active (admin console → Usage). The worker keeps
++  // the data and gates reads behind an ADMIN_TOKEN, so this stays owner-only.
++  // Set TELEMETRY_ENABLED to false to turn all of it off in a build you ship.
++  // When it's on, every user is shown a one-time notice that usage is recorded.
++  const TELEMETRY_ENABLED = true;
++  const TELEMETRY_ENDPOINT = OPENAI_PROXY; // same worker; blank disables tracking
+   const PROVIDER_KEY = 'gpa_ai_provider';
+   // Tells the AI what it is and what the console can do, so questions like
+   // "what can you do?" get a real answer. Injected into the chat-facing
+@@ -679,23 +687,24 @@
+             <div class="gpa-sub" style="margin:12px 0 4px;">Recent activity</div>
+             <div id="gpa-admin-log" class="gpa-admin-log"></div>
+ 
+-            <div class="gpa-sub" style="margin:16px 0 4px;">Cross-device telemetry (see other people, not just this browser)</div>
++            <div class="gpa-sub" style="margin:16px 0 4px;">🌐 Live — everyone using it right now (across all devices)</div>
+             <div class="gpa-admin-note">
+-              This is the only way to see opens from other people's devices. It needs a shared
+-              JSONBin the owner sets up, and — honestly — a key placed in a public script can't be
+-              kept owner-only, so treat these logs as low-security. When it's on, anyone who opens
+-              the tool sees a one-time notice that usage is recorded. It's off until you turn it on.
++              Reads from your worker, which only answers with your admin token — so these logs are
++              genuinely owner-only and no secret ships in the public script. Needs the worker set up
++              with a KV namespace and an ADMIN_TOKEN (see the README). Enter that token once below;
++              it's kept only on this device. Every user is shown a one-time notice that usage is recorded.
+             </div>
+             <div class="gpa-row" style="margin-top:6px;">
+-              <input id="gpa-tele-bin" class="gpa-input" placeholder="Shared Bin ID (logs)" autocomplete="off" />
++              <input id="gpa-tele-token" class="gpa-input" type="password" placeholder="Admin token (matches worker ADMIN_TOKEN)" autocomplete="off" />
+             </div>
+             <div class="gpa-row">
+-              <input id="gpa-tele-key" class="gpa-input" type="password" placeholder="X-Master-Key for that bin" autocomplete="off" />
++              <input id="gpa-tele-endpoint" class="gpa-input" placeholder="Worker URL (blank = default)" autocomplete="off" />
+             </div>
+             <div class="gpa-row" style="flex-wrap:wrap;">
+-              <button id="gpa-tele-toggle" class="gpa-btn" style="flex:1;">Telemetry: OFF</button>
+-              <button id="gpa-tele-pull" class="gpa-btn" style="flex:1;">⬇ Pull remote logs</button>
++              <button id="gpa-tele-refresh" class="gpa-btn primary" style="flex:1;">🔄 Load live users</button>
++              <button id="gpa-tele-auto" class="gpa-btn" style="flex:1;">▶ Auto-refresh: OFF</button>
+             </div>
++            <div id="gpa-tele-live" style="margin-top:8px;"></div>
+             <div id="gpa-tele-msg" class="gpa-sub" style="margin-top:4px;"></div>
+           </div>
+ 
+@@ -2203,9 +2212,8 @@
+     MAXCHARS: 'gpa_admin_maxchars',
+     TEMP: 'gpa_admin_temp',
+     LOGS: 'gpa_admin_logs',
+-    TELE_ON: 'gpa_admin_tele_on',
+-    TELE_BIN: 'gpa_admin_tele_bin',
+-    TELE_KEY: 'gpa_admin_tele_key',
++    TELE_TOKEN: 'gpa_admin_tele_token',      // admin secret (owner's device only)
++    TELE_ENDPOINT: 'gpa_admin_tele_endpoint', // worker base URL override
+     TELE_NOTICE_SEEN: 'gpa_tele_notice_seen'
+   };
+   function admGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+@@ -5035,7 +5043,7 @@
+   const NON_PROFILE_KEYS = [
+     SESSION_KEY, CLOUD_BIN_KEY, CLOUD_SECRET_KEY,
+     ADMIN_KEYS.MODEL, ADMIN_KEYS.SYSPREFIX, ADMIN_KEYS.MAXCHARS, ADMIN_KEYS.TEMP,
+-    ADMIN_KEYS.LOGS, ADMIN_KEYS.TELE_ON, ADMIN_KEYS.TELE_BIN, ADMIN_KEYS.TELE_KEY,
++    ADMIN_KEYS.LOGS, ADMIN_KEYS.TELE_TOKEN, ADMIN_KEYS.TELE_ENDPOINT,
+     ADMIN_KEYS.TELE_NOTICE_SEEN
+   ];
+ 
+@@ -5166,7 +5174,7 @@
+     // Record the open in the local usage log, and mirror it to the shared
+     // telemetry bin if the owner turned that on. Wrapped so a logging hiccup
+     // can never block a sign-in.
+-    try { logUsageEvent('open', user); } catch (e) { /* logging is best-effort */ }
++    try { logUsageEvent('open', user); startHeartbeat(); } catch (e) { /* logging is best-effort */ }
+     loginOverlay.style.display = 'none';
+     setLockedChrome(false);
+     refreshAccountUI();
+@@ -7594,36 +7602,52 @@
+     const arr = readLogs();
+     arr.push(entry);
+     writeLogs(arr);
+-    maybePushTelemetry(entry);
++    sendBeat(ev, entry.u);
+     maybeShowTelemetryNotice();
+   }
+ 
+-  // ---- Cross-device telemetry (opt-in, disclosed) ---------------------------
+-  // Sends each open to a shared JSONBin the owner configures, so opens from
+-  // OTHER people's devices land somewhere the owner can read. Read-modify-write
+-  // (JSONBin holds one record per bin). Fire-and-forget: a failed push must
+-  // never disrupt the person using the tool.
+-  function telemetryOn() { return admGet(ADMIN_KEYS.TELE_ON) === 'on'; }
+-  function telemetryCreds() {
+-    return { bin: (admGet(ADMIN_KEYS.TELE_BIN) || '').trim(), key: (admGet(ADMIN_KEYS.TELE_KEY) || '').trim() };
++  // ---- Cross-device telemetry (worker-backed) -------------------------------
++  // Each instance heartbeats to the worker's /track endpoint. The worker stores
++  // it in KV and only hands it back to a request bearing the ADMIN_TOKEN, so —
++  // unlike the old shared-key approach — the logs are genuinely owner-only and
++  // no secret ships in this public script. A per-load session id lets the
++  // worker show who is active right now. text/plain keeps the POST preflight-
++  // free. Fire-and-forget: a failed beat never surfaces to the user.
++  const TELE_SID = 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 9);
++  let heartbeatTimer = null;
++
++  function telemetryEndpoint() {
++    return ((admGet(ADMIN_KEYS.TELE_ENDPOINT) || '').trim() || TELEMETRY_ENDPOINT || '').replace(/\/+$/, '');
+   }
+-  async function maybePushTelemetry(entry) {
++  function telemetryOn() { return !!(TELEMETRY_ENABLED && telemetryEndpoint()); }
++
++  function sendBeat(event, user) {
+     if (!telemetryOn()) return;
+-    const { bin, key } = telemetryCreds();
+-    if (!bin || !key) return;
++    const payload = JSON.stringify({
++      sid: TELE_SID,
++      user: user || currentUser || 'anonymous',
++      host: location.hostname,
++      url: location.href.slice(0, 300),
++      event: event === 'open' ? 'open' : 'beat'
++    });
+     try {
+-      const cur = await fetch(`https://api.jsonbin.io/v3/b/${encodeURIComponent(bin)}/latest`, {
+-        headers: { 'X-Master-Key': key }
+-      }).then((r) => r.ok ? r.json() : null).catch(() => null);
+-      const rec = (cur && (cur.record || cur)) || {};
+-      const logs = Array.isArray(rec.logs) ? rec.logs : [];
+-      logs.push(entry);
+-      await fetch(`https://api.jsonbin.io/v3/b/${encodeURIComponent(bin)}`, {
+-        method: 'PUT',
+-        headers: { 'Content-Type': 'application/json', 'X-Master-Key': key },
+-        body: JSON.stringify({ logs: logs.slice(-2000) })
+-      });
+-    } catch (e) { /* telemetry is best-effort and must never surface to the user */ }
++      // text/plain = CORS-safelisted = no preflight. keepalive lets a beat
++      // sent as the tab closes still go out.
++      fetch(telemetryEndpoint() + '/track', {
++        method: 'POST',
++        headers: { 'Content-Type': 'text/plain' },
++        body: payload,
++        keepalive: true,
++        mode: 'cors'
++      }).catch(() => {});
++    } catch (e) { /* best-effort */ }
++  }
++
++  // While the tool is open and someone is signed in, refresh presence so the
++  // owner's "active now" list is live. Cleared if telemetry is off.
++  function startHeartbeat() {
++    if (heartbeatTimer || !telemetryOn()) return;
++    heartbeatTimer = setInterval(() => { if (currentUser) sendBeat('beat'); }, 45000);
+   }
+ 
+   // The disclosure the end user sees. Shown once per browser when telemetry is
+@@ -7756,61 +7780,91 @@
+       );
+     });
+ 
+-    // ---- Telemetry controls ----
+-    const teleBin = panel.querySelector('#gpa-tele-bin');
+-    const teleKey = panel.querySelector('#gpa-tele-key');
+-    const teleToggle = panel.querySelector('#gpa-tele-toggle');
++    // ---- Live users (worker telemetry) ----
++    const teleToken = panel.querySelector('#gpa-tele-token');
++    const teleEndpoint = panel.querySelector('#gpa-tele-endpoint');
+     const teleMsg = panel.querySelector('#gpa-tele-msg');
++    const teleLive = panel.querySelector('#gpa-tele-live');
++    const teleAutoBtn = panel.querySelector('#gpa-tele-auto');
++    let teleAutoTimer = null;
++
+     function loadTelemetryFields() {
+-      teleBin.value = admGet(ADMIN_KEYS.TELE_BIN) || '';
+-      teleKey.value = admGet(ADMIN_KEYS.TELE_KEY) || '';
+-      teleToggle.textContent = telemetryOn() ? 'Telemetry: ON' : 'Telemetry: OFF';
+-      teleToggle.classList.toggle('primary', telemetryOn());
+-    }
+-    function saveTeleCreds() {
+-      localStorage.setItem(ADMIN_KEYS.TELE_BIN, teleBin.value.trim());
+-      localStorage.setItem(ADMIN_KEYS.TELE_KEY, teleKey.value.trim());
+-    }
+-    teleBin.addEventListener('change', saveTeleCreds);
+-    teleKey.addEventListener('change', saveTeleCreds);
+-    teleToggle.addEventListener('click', () => {
+-      saveTeleCreds();
+-      const turningOn = !telemetryOn();
+-      if (turningOn && (!teleBin.value.trim() || !teleKey.value.trim())) {
+-        teleMsg.textContent = 'Add a shared Bin ID and its master key first.';
+-        return;
+-      }
+-      localStorage.setItem(ADMIN_KEYS.TELE_ON, turningOn ? 'on' : 'off');
+-      // Re-arm the end-user notice each time it's switched on, so people are
+-      // told again after any pause in collection.
+-      if (turningOn) localStorage.removeItem(ADMIN_KEYS.TELE_NOTICE_SEEN);
+-      loadTelemetryFields();
+-      teleMsg.textContent = turningOn
+-        ? 'On. Opens from every device pointed at this bin will collect here. Users see a one-time notice.'
+-        : 'Off. Only this browser is logged now.';
+-    });
+-    panel.querySelector('#gpa-tele-pull').addEventListener('click', async () => {
+-      saveTeleCreds();
+-      const bin = teleBin.value.trim(), key = teleKey.value.trim();
+-      if (!bin || !key) { teleMsg.textContent = 'Add a shared Bin ID and its master key first.'; return; }
+-      teleMsg.textContent = 'Pulling…';
++      teleToken.value = admGet(ADMIN_KEYS.TELE_TOKEN) || '';
++      teleEndpoint.value = admGet(ADMIN_KEYS.TELE_ENDPOINT) || '';
++      teleEndpoint.placeholder = 'Worker URL (blank = ' + (TELEMETRY_ENDPOINT || 'none') + ')';
++    }
++    function saveTeleFields() {
++      localStorage.setItem(ADMIN_KEYS.TELE_TOKEN, teleToken.value.trim());
++      localStorage.setItem(ADMIN_KEYS.TELE_ENDPOINT, teleEndpoint.value.trim());
++    }
++    teleToken.addEventListener('change', saveTeleFields);
++    teleEndpoint.addEventListener('change', saveTeleFields);
++
++    function ago(ms) {
++      const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
++      if (s < 60) return s + 's ago';
++      const m = Math.round(s / 60);
++      if (m < 60) return m + 'm ago';
++      const h = Math.round(m / 60);
++      return h < 24 ? h + 'h ago' : Math.round(h / 24) + 'd ago';
++    }
++    function renderLive(data) {
++      const active = data.active || [];
++      const users = data.users || [];
++      const dot = '<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#22c55e;margin-right:5px;box-shadow:0 0 6px #22c55e;"></span>';
++      const activeRows = active.map((s) => {
++        const where = [s.host, s.region, s.country].filter(Boolean).join(' · ');
++        return `<div class="gpa-admin-userrow">${dot}<b>${escapeHtml(s.user)}</b>`
++          + `<span>${escapeHtml(where)} · ${escapeHtml(ago(s.lastSeen))}</span></div>`;
++      }).join('');
++      const userRows = users.map((u) => {
++        const where = [u.country, u.region].filter(Boolean).join(' · ');
++        return `<div class="gpa-admin-userrow"><b>${escapeHtml(u.user)}</b>`
++          + `<span>${u.opens || 0}× · ${escapeHtml(where)} · last ${escapeHtml(ago(u.lastSeen))}</span></div>`;
++      }).join('');
++      teleLive.innerHTML =
++        `<div class="gpa-admin-statcard" style="margin-bottom:8px;"><span class="n">${data.activeCount || 0}</span><div class="l">active right now</div></div>`
++        + `<div class="gpa-sub" style="margin:4px 0;">Active now</div>`
++        + `<div class="gpa-admin-users">${activeRows || '<div class="gpa-sub">Nobody active in the last few minutes.</div>'}</div>`
++        + `<div class="gpa-sub" style="margin:10px 0 4px;">Everyone who has ever opened it (${users.length})</div>`
++        + `<div class="gpa-admin-users">${userRows || '<div class="gpa-sub">No users recorded yet.</div>'}</div>`;
++    }
++    async function loadLive() {
++      saveTeleFields();
++      const token = teleToken.value.trim();
++      const base = (teleEndpoint.value.trim() || TELEMETRY_ENDPOINT || '').replace(/\/+$/, '');
++      if (!base) { teleMsg.textContent = 'No worker URL configured.'; return; }
++      if (!token) { teleMsg.textContent = 'Enter your admin token (the worker\'s ADMIN_TOKEN).'; return; }
++      teleMsg.textContent = 'Loading…';
+       try {
+-        const json = await fetch(`https://api.jsonbin.io/v3/b/${encodeURIComponent(bin)}/latest`, {
+-          headers: { 'X-Master-Key': key }
+-        }).then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
+-        const rec = (json && (json.record || json)) || {};
+-        const remote = Array.isArray(rec.logs) ? rec.logs : [];
+-        // Merge remote into the local view, de-duped by user+event+timestamp.
+-        const seen = new Set(readLogs().map((l) => l.u + '|' + l.ev + '|' + l.ts));
+-        const merged = readLogs();
+-        remote.forEach((l) => { const id = l.u + '|' + l.ev + '|' + l.ts; if (!seen.has(id)) { seen.add(id); merged.push(l); } });
+-        merged.sort((a, b) => a.ts - b.ts);
+-        writeLogs(merged);
+-        renderUsage();
+-        teleMsg.textContent = `Pulled ${remote.length} remote entr${remote.length === 1 ? 'y' : 'ies'}.`;
++        const res = await fetch(base + '/admin/summary?token=' + encodeURIComponent(token));
++        const data = await res.json().catch(() => ({}));
++        if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
++        renderLive(data);
++        teleMsg.textContent = `Updated ${new Date().toLocaleTimeString()} · ${data.activeCount || 0} active, ${(data.users || []).length} total.`;
+       } catch (e) {
+-        teleMsg.textContent = 'Pull failed: ' + e.message;
++        teleMsg.textContent = 'Could not load: ' + e.message
++          + (/unauthorized/i.test(e.message) ? ' (token doesn\'t match the worker\'s ADMIN_TOKEN)' : '')
++          + (/not set|not bound/i.test(e.message) ? ' — finish the worker setup in the README.' : '');
+       }
++    }
++    panel.querySelector('#gpa-tele-refresh').addEventListener('click', loadLive);
++    teleAutoBtn.addEventListener('click', () => {
++      if (teleAutoTimer) {
++        clearInterval(teleAutoTimer); teleAutoTimer = null;
++        teleAutoBtn.textContent = '▶ Auto-refresh: OFF';
++        teleAutoBtn.classList.remove('primary');
++      } else {
++        loadLive();
++        teleAutoTimer = setInterval(loadLive, 15000);
++        teleAutoBtn.textContent = '⏸ Auto-refresh: ON';
++        teleAutoBtn.classList.add('primary');
++      }
++    });
++    // Stop auto-refresh when the admin panel is locked, so it doesn't poll
++    // forever in the background.
++    panel.querySelector('#gpa-admin-lock').addEventListener('click', () => {
++      if (teleAutoTimer) { clearInterval(teleAutoTimer); teleAutoTimer = null; teleAutoBtn.textContent = '▶ Auto-refresh: OFF'; teleAutoBtn.classList.remove('primary'); }
+     });
+ 
+     // ---- Power tools ----
+diff --git a/worker.js b/worker.js
+index 18580da..ebfd1f8 100644
+--- a/worker.js
++++ b/worker.js
+@@ -13,13 +13,17 @@
+ //                        is not allowed to fetch (CORS). HTML/text only.
+ 
+ export default {
+-  async fetch(req) {
++  async fetch(req, env) {
+     const cors = {
+       'Access-Control-Allow-Origin': '*',
+       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+       'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-GPA-Key',
+       'Access-Control-Max-Age': '86400'
+     };
++    const json = (obj, status) => new Response(JSON.stringify(obj), {
++      status: status || 200,
++      headers: { ...cors, 'Content-Type': 'application/json' }
++    });
+ 
+     if (req.method === 'OPTIONS') {
+       return new Response(null, { status: 204, headers: cors });
+@@ -27,6 +31,101 @@ export default {
+ 
+     const url = new URL(req.url);
+ 
++    // ==== Usage telemetry (Cloudflare KV) ================================
++    //
++    // Backed by a KV namespace you bind as `TELEMETRY` in the Cloudflare
++    // dashboard, and an admin secret you set as the `ADMIN_TOKEN` variable.
++    // Neither the KV nor the token is ever exposed to the browser: users can
++    // only WRITE their own heartbeat (/track), and only a request bearing the
++    // ADMIN_TOKEN can READ the logs (/admin/*). That is real, server-side
++    // access control — unlike a key placed in the public script, which anyone
++    // could read. Presence ("active now") is a per-session KV key with a short
++    // TTL, so a user drops off the live list on their own ~2.5 min after their
++    // last heartbeat, with no cleanup job.
++    const SESSION_TTL = 150;        // seconds a session counts as "active"
++
++    if (url.pathname === '/track' && req.method === 'POST') {
++      const kv = env && env.TELEMETRY;
++      if (!kv) return json({ ok: false, error: 'telemetry KV not bound' }, 200);
++      // text/plain body so the browser sends no CORS preflight.
++      let body = {};
++      try { body = JSON.parse(await req.text()); } catch (e) { /* tolerate */ }
++      const clip = (v, n) => String(v == null ? '' : v).slice(0, n);
++      const user = clip(body.user || 'anonymous', 80);
++      const sid = clip(body.sid, 60) || crypto.randomUUID();
++      const now = Date.now();
++      const cf = req.cf || {};
++      const rec = {
++        user,
++        host: clip(body.host, 120),
++        url: clip(body.url, 300),
++        country: cf.country || '??',
++        region: clip(cf.region || cf.city || '', 60),
++        lastSeen: now
++      };
++      try {
++        // Presence: expires on its own -> "active now" needs no cleanup.
++        await kv.put('session:' + sid, JSON.stringify(rec), { expirationTtl: SESSION_TTL });
++        // All-time rollup, refreshed on the "open" event (not every beat) to
++        // stay well inside KV's free-tier write budget.
++        if (body.event === 'open') {
++          const uKey = 'user:' + user.toLowerCase();
++          const prev = await kv.get(uKey, 'json');
++          await kv.put(uKey, JSON.stringify({
++            user,
++            host: rec.host,
++            country: rec.country,
++            region: rec.region,
++            firstSeen: (prev && prev.firstSeen) || now,
++            lastSeen: now,
++            opens: ((prev && prev.opens) || 0) + 1
++          }));
++        }
++      } catch (e) { return json({ ok: false }, 200); }
++      return new Response(null, { status: 204, headers: cors });
++    }
++
++    if (url.pathname === '/admin/summary' && req.method === 'GET') {
++      const kv = env && env.TELEMETRY;
++      const ADMIN = (env && env.ADMIN_TOKEN) || '';
++      if (!kv) return json({ error: 'telemetry KV not bound on the worker' }, 500);
++      if (!ADMIN) return json({ error: 'ADMIN_TOKEN not set on the worker' }, 500);
++      if ((url.searchParams.get('token') || '') !== ADMIN) return json({ error: 'unauthorized' }, 401);
++
++      const active = [];
++      const sess = await kv.list({ prefix: 'session:' });
++      for (const k of sess.keys) { const v = await kv.get(k.name, 'json'); if (v) active.push(v); }
++      const users = [];
++      const ul = await kv.list({ prefix: 'user:' });
++      for (const k of ul.keys) { const v = await kv.get(k.name, 'json'); if (v) users.push(v); }
++
++      // Collapse multiple live sessions from one user into a single presence.
++      const activeByUser = {};
++      active.forEach((s) => {
++        const u = activeByUser[s.user];
++        if (!u || s.lastSeen > u.lastSeen) activeByUser[s.user] = s;
++      });
++      return json({
++        now: Date.now(),
++        activeCount: Object.keys(activeByUser).length,
++        active: Object.values(activeByUser).sort((a, b) => b.lastSeen - a.lastSeen),
++        users: users.sort((a, b) => b.lastSeen - a.lastSeen)
++      });
++    }
++
++    if (url.pathname === '/admin/clear' && req.method === 'POST') {
++      const kv = env && env.TELEMETRY;
++      const ADMIN = (env && env.ADMIN_TOKEN) || '';
++      if (!kv) return json({ error: 'telemetry KV not bound' }, 500);
++      if (!ADMIN || (url.searchParams.get('token') || '') !== ADMIN) return json({ error: 'unauthorized' }, 401);
++      let deleted = 0;
++      for (const prefix of ['session:', 'user:']) {
++        const list = await kv.list({ prefix });
++        for (const k of list.keys) { await kv.delete(k.name); deleted++; }
++      }
++      return json({ ok: true, deleted });
++    }
++
+     // ---- /read?url=… : server-side page fetch for research mode ----
+     if (url.pathname === '/read') {
+       const target = url.searchParams.get('url');
+-- 
+2.43.0
+
+
+From e362e98a1f5a0c299b26e5d32bd249ea52be5cd2 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sun, 13 Sep 2026 20:52:21 +0000
+Subject: [PATCH 6/6] Add owner moderation: block, lock, kick +
+ blocked-by-owner page
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+From the admin Live view, each user row now has Block / Lock / Kick
+controls (with an optional message to show the user).
+
+Worker:
+- mod:<user> state in KV (active | blocked | locked + kickNonce + reason).
+- POST /admin/moderate (token-gated) sets it; GET /status?user= is a
+  read-only poll for clients; /track returns the caller's state on every
+  beat; /admin/summary stamps each user with their state.
+- The /v1 OpenAI proxy checks the caller's X-GPA-User against the block
+  list and returns 403 blocked_by_owner — the one piece of enforcement a
+  user can't edit out of their own browser.
+
+Client:
+- Polls /status every 15s (and reads it off each heartbeat). Blocked ->
+  full-screen "Blocked by the owner" overlay + local AI cut-off (so
+  Gemini, which bypasses the worker, is stopped too). Locked -> lighter
+  freeze overlay. Kick (nonce bump past this session's baseline) -> forced
+  sign-out with a message. Sends X-GPA-User on proxy calls.
+- explainError surfaces the block reason instead of a generic message.
+
+The honest limits are documented in the README and the panel: client-side
+controls can be edited out by a determined user; the server-side proxy
+gate is the real tooth, but can't cover Gemini or direct-mode/own-key use.
+
+Tested: worker moderation against a mock KV (state set/read, token gate,
+proxy 403 for blocked + pass-through for others, kick nonce, track/summary
+state) and the client in Chromium (block shows the page with reason and
+refuses AI, unblock clears it, kick signs out).
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_019GqTQm8E1znRkM37YVj6K7
+---
+ README.md |  13 +++++
+ script.js | 165 ++++++++++++++++++++++++++++++++++++++++++++++++++----
+ worker.js |  75 +++++++++++++++++++++++--
+ 3 files changed, 237 insertions(+), 16 deletions(-)
+
+diff --git a/README.md b/README.md
+index ed2d146..45c40e1 100644
+--- a/README.md
++++ b/README.md
+@@ -114,6 +114,18 @@ In the Cloudflare dashboard, on the same Worker you deploy `worker.js` to:
+ 
+ Until KV and `ADMIN_TOKEN` are set, `/track` just no-ops and the Live view tells you what's missing — the OpenAI proxy and everything else keep working regardless. Cloudflare's free tier covers a KV namespace and comfortably handles a personal-scale user base; heartbeats are throttled (presence refresh every 45s, all-time rollup only on open) to stay well inside the free write limits.
+ 
++#### Moderating users
++
++Every row in the Live view has **Block**, **Lock**, and **Kick** buttons (Block and Lock flip to Unblock/Unlock once set). Each writes a moderation state to your Worker's KV against that username:
++
++- **Block** — the user gets a full-screen "Blocked by the owner" page with your optional message, and can't use the AI features. Persists until you unblock.
++- **Lock** — a lighter "Locked by the owner" overlay that freezes their panel; meant for a temporary pause.
++- **Kick** — forces a one-time sign-out. They can sign back in unless they're also blocked.
++
++Every client polls its own status every 15 seconds (and gets it on each heartbeat), so an action lands within about that long.
++
++**Be clear-eyed about what enforcement means here.** This is JavaScript running in someone else's browser, so the block page, the lock, and the kick are *client-side* — a technically capable user could edit them out of their own copy. The part that genuinely bites is server-side: your Worker refuses to proxy OpenAI requests for a blocked user (it checks the `X-GPA-User` the client sends against the block list and returns `403`). So a blocked user loses the OpenAI features for real. The gaps, stated plainly: it can't stop Gemini (the browser calls Google directly, not through your Worker) or someone running in direct mode with their own key, and a spoofed username sidesteps the proxy check. For a personal tool shared with friends and classmates this is plenty; it is not a hardened access-control system, and nothing client-side ever can be.
++
+ ### Browser
+ A plain iframe with a URL bar. It only loads sites that allow being embedded — banks, most social apps, and SoundCloud's own site set `X-Frame-Options` or CSP `frame-ancestors` to prevent it. That's a protection those sites deliberately set, and this script makes no attempt to circumvent it.
+ 
+@@ -147,6 +159,7 @@ An optional Cloudflare Worker that does two small things the browser can't do on
+ - **`/read?url=…`** — fetches a page server-side and returns its HTML, so research mode can read sources the browser isn't allowed to fetch cross-origin. HTML and plain text only, capped at 3MB.
+ - **`/track`** — receives usage heartbeats and stores them in the `TELEMETRY` KV namespace (a short-TTL session key for presence, a per-user rollup on open). No-ops if KV isn't bound.
+ - **`/admin/summary`** and **`/admin/clear`** — return or wipe the usage logs, but only for a request whose `?token=` matches the Worker's `ADMIN_TOKEN` env var. This is where the owner-only access control actually lives.
++- **`/status?user=`** — read-only current moderation state for one user; clients poll it. **`/admin/moderate`** — token-gated; sets a user's state to blocked / locked / active or bumps their kick counter. The `/v1/*` proxy also checks the caller's `X-GPA-User` against the block list and returns `403` for a blocked user.
+ 
+ ### Deploying it
+ 
+diff --git a/script.js b/script.js
+index 31ae3f8..631fe51 100644
+--- a/script.js
++++ b/script.js
+@@ -2461,6 +2461,10 @@
+     if (OPENAI_PROXY) {
+       headers['X-GPA-Key'] = key;
+       payload._gpa_key = key;
++      // Tells the worker who is asking, so it can refuse a blocked user. Only
++      // an identifier — never the key. Best-effort: a modified client could
++      // omit it, which is why blocking is "soft"; see the admin console note.
++      if (typeof currentUser !== 'undefined' && currentUser) headers['X-GPA-User'] = currentUser;
+     }
+     const endpoint = OPENAI_PROXY
+       ? `${OPENAI_PROXY}/v1/chat/completions`
+@@ -2520,6 +2524,7 @@
+ 
+   // Dispatches to whichever provider is selected in the Theme tab.
+   async function callAI(userText, systemText, imageDataUrls) {
++    if (aiBlocked) throw new Error('Access to this tool has been blocked by the owner.');
+     const provider = localStorage.getItem(PROVIDER_KEY) || 'gemini';
+     // Order matters: admin standing instructions, then saved context, then the
+     // caller's own system text LAST — the JSON-only rules several callers rely
+@@ -2556,6 +2561,7 @@
+     const statusMatch = msg.match(/\((\d{3})\)/);
+     const status = statusMatch ? statusMatch[1] : null;
+ 
++    if (/blocked by the owner|blocked_by_owner/i.test(msg)) return 'Your access to this tool has been blocked by the owner.';
+     if (/No .*API key provided/i.test(msg)) return 'No API key entered yet — try again and paste one when prompted.';
+     if (/cannot be sent in a request header|Invalid value|refused header/i.test(msg)) {
+       return 'Your saved API key has hidden characters in it — that happens when it is copied out of a styled page or document. Clear the key in Settings, then paste it again.';
+@@ -7615,6 +7621,10 @@
+   // free. Fire-and-forget: a failed beat never surfaces to the user.
+   const TELE_SID = 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 9);
+   let heartbeatTimer = null;
++  // Set true while this user is blocked, so callAI refuses locally too — the
++  // worker already refuses the OpenAI proxy, but Gemini goes direct to Google
++  // and only this client-side guard stops it.
++  let aiBlocked = false;
+ 
+   function telemetryEndpoint() {
+     return ((admGet(ADMIN_KEYS.TELE_ENDPOINT) || '').trim() || TELEMETRY_ENDPOINT || '').replace(/\/+$/, '');
+@@ -7639,15 +7649,99 @@
+         body: payload,
+         keepalive: true,
+         mode: 'cors'
+-      }).catch(() => {});
++      }).then((r) => (r.ok ? r.json() : null)).then((s) => { if (s) applyModeration(s); }).catch(() => {});
+     } catch (e) { /* best-effort */ }
+   }
+ 
+   // While the tool is open and someone is signed in, refresh presence so the
+-  // owner's "active now" list is live. Cleared if telemetry is off.
++  // owner's "active now" list is live, and poll moderation status so a
++  // block/lock/kick reaches them quickly. Cleared if telemetry is off.
+   function startHeartbeat() {
+     if (heartbeatTimer || !telemetryOn()) return;
+     heartbeatTimer = setInterval(() => { if (currentUser) sendBeat('beat'); }, 45000);
++    startStatusPolling();
++  }
++
++  // ---- Owner moderation (block / lock / kick) enforcement -------------------
++  // The owner sets a user's state from the admin console; every client polls
++  // its own status and applies it. Honest limitation: this runs in the user's
++  // own browser, so a determined user could edit it out. The real, un-editable
++  // lever is the worker refusing to proxy AI for a blocked user (see worker).
++  let statusTimer = null;
++  let modBaselineKick = null;   // kick counter we've already acted on this load
++  let modOverlayEl = null;
++
++  function startStatusPolling() {
++    if (statusTimer || !telemetryOn()) return;
++    statusTimer = setInterval(pollStatus, 15000);
++    pollStatus();
++  }
++  async function pollStatus() {
++    if (!telemetryOn() || !currentUser) return;
++    try {
++      const res = await fetch(telemetryEndpoint() + '/status?user=' + encodeURIComponent(currentUser));
++      if (!res.ok) return;
++      applyModeration(await res.json());
++    } catch (e) { /* best-effort */ }
++  }
++
++  function applyModeration(s) {
++    if (!s || typeof s !== 'object') return;
++    if (typeof s.kickNonce === 'number') {
++      // Baseline on the first status we see, so an old kick doesn't fire on
++      // load — only a kick issued while this session is live boots them.
++      if (modBaselineKick === null) modBaselineKick = s.kickNonce;
++      else if (s.kickNonce > modBaselineKick) {
++        modBaselineKick = s.kickNonce;
++        doKick(s.reason);
++        return;
++      }
++    }
++    if (s.state === 'blocked') showModOverlay('blocked', s.reason);
++    else if (s.state === 'locked') showModOverlay('locked', s.reason);
++    else hideModOverlay();
++  }
++
++  function showModOverlay(kind, reason) {
++    const t = THEMES[theme] || THEMES.dark;
++    if (getComputedStyle(panel).position === 'static') panel.style.position = 'relative';
++    if (!modOverlayEl) {
++      modOverlayEl = document.createElement('div');
++      modOverlayEl.style.cssText = 'position:absolute;inset:0;z-index:2147483000;display:flex;'
++        + 'flex-direction:column;align-items:center;justify-content:center;text-align:center;'
++        + 'padding:24px;gap:10px;backdrop-filter:blur(3px);';
++      panel.appendChild(modOverlayEl);
++    }
++    const blocked = kind === 'blocked';
++    modOverlayEl.style.background = blocked ? 'rgba(20,4,4,0.94)' : 'rgba(10,10,16,0.92)';
++    modOverlayEl.style.border = `2px solid ${blocked ? '#e5453a' : t.accent}`;
++    modOverlayEl.innerHTML =
++      `<div style="font-size:40px;">${blocked ? '⛔' : '🔒'}</div>`
++      + `<div style="font:700 15px/1.3 ui-monospace,monospace;color:${blocked ? '#ff6b6b' : t.accent};">`
++      + `${blocked ? 'Blocked by the owner' : 'Locked by the owner'}</div>`
++      + `<div style="font:12px/1.5 ui-monospace,monospace;color:#e8e8ea;max-width:280px;">`
++      + `${reason ? escapeHtml(reason) : (blocked ? 'Your access to this tool has been turned off.' : 'This tool is temporarily locked. Check back later.')}</div>`;
++    modOverlayEl.style.display = 'flex';
++    // Blocking should also cut AI use immediately, not just cover the panel.
++    aiBlocked = blocked;
++  }
++  function hideModOverlay() {
++    aiBlocked = false;
++    if (modOverlayEl) modOverlayEl.style.display = 'none';
++  }
++  function doKick(reason) {
++    hideModOverlay();
++    try { if (typeof saveProgress === 'function') saveProgress(); } catch (e) { /* ignore */ }
++    currentUser = null;
++    try { localStorage.removeItem(SESSION_KEY); } catch (e) { /* ignore */ }
++    if (statusTimer) { clearInterval(statusTimer); statusTimer = null; }
++    if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
++    if (typeof refreshAccountUI === 'function') refreshAccountUI();
++    if (loginOverlay) loginOverlay.style.display = 'flex';
++    if (typeof setLockedChrome === 'function') setLockedChrome(true);
++    if (typeof showLoginMsg === 'function') {
++      showLoginMsg('You were signed out by the owner.' + (reason ? ' ' + reason : ''), true);
++    }
+   }
+ 
+   // The disclosure the end user sees. Shown once per browser when telemetry is
+@@ -7808,20 +7902,38 @@
+       const h = Math.round(m / 60);
+       return h < 24 ? h + 'h ago' : Math.round(h / 24) + 'd ago';
+     }
++    function stateBadge(state) {
++      if (state === 'blocked') return '<span style="color:#ff6b6b;font-weight:700;">⛔ blocked</span>';
++      if (state === 'locked') return '<span style="color:#eab308;font-weight:700;">🔒 locked</span>';
++      return '';
++    }
++    // The moderation buttons for one user, keyed by username via data-attrs.
++    function modButtons(user, state) {
++      const b = (action, label, title) =>
++        `<button class="gpa-btn gpa-mod-btn" data-mod-user="${escapeHtml(user)}" data-mod-action="${action}" title="${title}"`
++        + ` style="font-size:9px;padding:2px 6px;">${label}</button>`;
++      const parts = [];
++      if (state === 'blocked') parts.push(b('unblock', '✅ Unblock', 'Restore access'));
++      else parts.push(b('block', '⛔ Block', 'Blocked-by-owner page + cut off AI'));
++      if (state === 'locked') parts.push(b('unlock', '🔓 Unlock', 'Remove the lock'));
++      else if (state !== 'blocked') parts.push(b('lock', '🔒 Lock', 'Temporarily freeze their panel'));
++      parts.push(b('kick', '👢 Kick', 'Force a one-time sign-out'));
++      return `<div class="gpa-row" style="gap:4px;margin-top:4px;flex-wrap:wrap;">${parts.join('')}</div>`;
++    }
+     function renderLive(data) {
+       const active = data.active || [];
+       const users = data.users || [];
+       const dot = '<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#22c55e;margin-right:5px;box-shadow:0 0 6px #22c55e;"></span>';
+-      const activeRows = active.map((s) => {
+-        const where = [s.host, s.region, s.country].filter(Boolean).join(' · ');
+-        return `<div class="gpa-admin-userrow">${dot}<b>${escapeHtml(s.user)}</b>`
+-          + `<span>${escapeHtml(where)} · ${escapeHtml(ago(s.lastSeen))}</span></div>`;
+-      }).join('');
+-      const userRows = users.map((u) => {
+-        const where = [u.country, u.region].filter(Boolean).join(' · ');
+-        return `<div class="gpa-admin-userrow"><b>${escapeHtml(u.user)}</b>`
+-          + `<span>${u.opens || 0}× · ${escapeHtml(where)} · last ${escapeHtml(ago(u.lastSeen))}</span></div>`;
+-      }).join('');
++      const row = (name, meta, state) =>
++        `<div class="gpa-admin-userrow" style="flex-direction:column;align-items:stretch;">`
++        + `<div class="gpa-row" style="justify-content:space-between;gap:8px;">`
++        + `<span>${dot}<b>${escapeHtml(name)}</b> ${stateBadge(state)}</span>`
++        + `<span style="opacity:0.8;">${escapeHtml(meta)}</span></div>`
++        + modButtons(name, state) + `</div>`;
++      const activeRows = active.map((s) =>
++        row(s.user, [s.host, s.region, s.country].filter(Boolean).join(' · ') + ' · ' + ago(s.lastSeen), s.state)).join('');
++      const userRows = users.map((u) =>
++        row(u.user, (u.opens || 0) + '× · ' + [u.country, u.region].filter(Boolean).join(' · ') + ' · last ' + ago(u.lastSeen), u.state)).join('');
+       teleLive.innerHTML =
+         `<div class="gpa-admin-statcard" style="margin-bottom:8px;"><span class="n">${data.activeCount || 0}</span><div class="l">active right now</div></div>`
+         + `<div class="gpa-sub" style="margin:4px 0;">Active now</div>`
+@@ -7829,6 +7941,35 @@
+         + `<div class="gpa-sub" style="margin:10px 0 4px;">Everyone who has ever opened it (${users.length})</div>`
+         + `<div class="gpa-admin-users">${userRows || '<div class="gpa-sub">No users recorded yet.</div>'}</div>`;
+     }
++
++    // One delegated handler for every moderation button.
++    async function moderate(user, action) {
++      const token = teleToken.value.trim();
++      const base = (teleEndpoint.value.trim() || TELEMETRY_ENDPOINT || '').replace(/\/+$/, '');
++      if (!token || !base) { teleMsg.textContent = 'Set the worker URL and admin token first.'; return; }
++      let reason = '';
++      if (action === 'block' || action === 'lock' || action === 'kick') {
++        reason = prompt(`Message to show ${user} (optional):`, '') || '';
++      }
++      teleMsg.textContent = `${action} ${user}…`;
++      try {
++        const res = await fetch(base + '/admin/moderate?token=' + encodeURIComponent(token), {
++          method: 'POST', headers: { 'Content-Type': 'text/plain' },
++          body: JSON.stringify({ user, action, reason })
++        });
++        const data = await res.json().catch(() => ({}));
++        if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
++        teleMsg.textContent = `${user}: ${action} done.`;
++        loadLive();
++      } catch (e) {
++        teleMsg.textContent = 'Action failed: ' + e.message;
++      }
++    }
++    teleLive.addEventListener('click', (e) => {
++      const btn = e.target.closest('.gpa-mod-btn');
++      if (!btn) return;
++      moderate(btn.dataset.modUser, btn.dataset.modAction);
++    });
+     async function loadLive() {
+       saveTeleFields();
+       const token = teleToken.value.trim();
+diff --git a/worker.js b/worker.js
+index ebfd1f8..5e6c0ca 100644
+--- a/worker.js
++++ b/worker.js
+@@ -17,7 +17,7 @@ export default {
+     const cors = {
+       'Access-Control-Allow-Origin': '*',
+       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+-      'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-GPA-Key',
++      'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-GPA-Key, X-GPA-User',
+       'Access-Control-Max-Age': '86400'
+     };
+     const json = (obj, status) => new Response(JSON.stringify(obj), {
+@@ -25,6 +25,15 @@ export default {
+       headers: { ...cors, 'Content-Type': 'application/json' }
+     });
+ 
++    // Moderation state for one user: active (default), blocked, or locked,
++    // plus a kick counter the client compares against to force a one-time
++    // sign-out. Read wherever we need to enforce or report it.
++    const getMod = async (kv, user) => {
++      if (!kv || !user) return { state: 'active', reason: '', kickNonce: 0 };
++      const m = await kv.get('mod:' + String(user).toLowerCase(), 'json');
++      return m || { state: 'active', reason: '', kickNonce: 0 };
++    };
++
+     if (req.method === 'OPTIONS') {
+       return new Response(null, { status: 204, headers: cors });
+     }
+@@ -82,7 +91,44 @@ export default {
+           }));
+         }
+       } catch (e) { return json({ ok: false }, 200); }
+-      return new Response(null, { status: 204, headers: cors });
++      // Hand the caller its own moderation state back on every beat, so a
++      // block/lock/kick reaches them within one heartbeat even without the
++      // separate /status poll.
++      const mod = await getMod(kv, user);
++      return json({ ok: true, state: mod.state || 'active', reason: mod.reason || '', kickNonce: mod.kickNonce || 0 });
++    }
++
++    // Read-only status for one user — the client polls this so a block takes
++    // effect fast without waiting for the next (write-costing) heartbeat.
++    if (url.pathname === '/status' && req.method === 'GET') {
++      const kv = env && env.TELEMETRY;
++      const mod = await getMod(kv, url.searchParams.get('user') || '');
++      return json({ state: mod.state || 'active', reason: mod.reason || '', kickNonce: mod.kickNonce || 0 });
++    }
++
++    // Owner sets a user's moderation state. Token-gated like the other admin
++    // routes, so only the owner can call it.
++    if (url.pathname === '/admin/moderate' && req.method === 'POST') {
++      const kv = env && env.TELEMETRY;
++      const ADMIN = (env && env.ADMIN_TOKEN) || '';
++      if (!kv) return json({ error: 'telemetry KV not bound' }, 500);
++      if (!ADMIN || (url.searchParams.get('token') || '') !== ADMIN) return json({ error: 'unauthorized' }, 401);
++      let body = {};
++      try { body = JSON.parse(await req.text()); } catch (e) { /* tolerate */ }
++      const user = String(body.user || '').toLowerCase().slice(0, 80);
++      if (!user) return json({ error: 'no user' }, 400);
++      const key = 'mod:' + user;
++      const cur = (await kv.get(key, 'json')) || { state: 'active', reason: '', kickNonce: 0 };
++      const action = body.action;
++      if (action === 'block') cur.state = 'blocked';
++      else if (action === 'lock') cur.state = 'locked';
++      else if (action === 'unblock' || action === 'unlock' || action === 'reset') cur.state = 'active';
++      else if (action === 'kick') cur.kickNonce = (cur.kickNonce || 0) + 1;
++      else return json({ error: 'unknown action' }, 400);
++      cur.reason = String(body.reason || '').slice(0, 300);
++      cur.updatedAt = Date.now();
++      await kv.put(key, JSON.stringify(cur));
++      return json({ ok: true, user, mod: cur });
+     }
+ 
+     if (url.pathname === '/admin/summary' && req.method === 'GET') {
+@@ -99,17 +145,25 @@ export default {
+       const ul = await kv.list({ prefix: 'user:' });
+       for (const k of ul.keys) { const v = await kv.get(k.name, 'json'); if (v) users.push(v); }
+ 
++      // Moderation states, so the admin sees who's blocked/locked at a glance.
++      const mods = {};
++      const ml = await kv.list({ prefix: 'mod:' });
++      for (const k of ml.keys) { const v = await kv.get(k.name, 'json'); if (v) mods[k.name.slice(4)] = v; }
++      const stateOf = (u) => (mods[String(u).toLowerCase()] || {}).state || 'active';
++      const reasonOf = (u) => (mods[String(u).toLowerCase()] || {}).reason || '';
++
+       // Collapse multiple live sessions from one user into a single presence.
+       const activeByUser = {};
+       active.forEach((s) => {
+         const u = activeByUser[s.user];
+         if (!u || s.lastSeen > u.lastSeen) activeByUser[s.user] = s;
+       });
++      const stamp = (arr) => arr.map((x) => ({ ...x, state: stateOf(x.user), reason: reasonOf(x.user) }));
+       return json({
+         now: Date.now(),
+         activeCount: Object.keys(activeByUser).length,
+-        active: Object.values(activeByUser).sort((a, b) => b.lastSeen - a.lastSeen),
+-        users: users.sort((a, b) => b.lastSeen - a.lastSeen)
++        active: stamp(Object.values(activeByUser).sort((a, b) => b.lastSeen - a.lastSeen)),
++        users: stamp(users.sort((a, b) => b.lastSeen - a.lastSeen))
+       });
+     }
+ 
+@@ -163,6 +217,19 @@ export default {
+     }
+ 
+     // ---- /v1/* : forward to OpenAI ----
++    // Server-side moderation tooth: a blocked user is refused here, so blocking
++    // actually costs them the AI features rather than only hiding the panel.
++    // The client sends its signed-in name as X-GPA-User. (This can't gate
++    // Gemini, which the browser calls directly, or a user who supplies their
++    // own key in direct mode — those bypass the worker entirely.)
++    const modUser = req.headers.get('X-GPA-User');
++    if (modUser && env && env.TELEMETRY) {
++      const m = await getMod(env.TELEMETRY, modUser);
++      if (m.state === 'blocked') {
++        return json({ error: { message: 'Access to this tool has been blocked by the owner.' + (m.reason ? ' ' + m.reason : ''), type: 'blocked_by_owner' } }, 403);
++      }
++    }
++
+     // The key can arrive four ways, tried in this order:
+     //   1. a normal Authorization header
+     //   2. the X-GPA-Key header    — for pages that rewrite Authorization
+-- 
+2.43.0
