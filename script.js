@@ -453,8 +453,20 @@
       </div>
 
       <div class="gpa-pane" data-pane="saved">
-        <div class="gpa-sub" style="margin-bottom:8px;">Your Saved Insights</div>
-        <div id="gpa-saved-list" class="gpa-chat"></div>
+        <div class="gpa-row" style="justify-content:space-between;">
+          <button id="gpa-saved-view-cal" class="gpa-btn saved-view-btn primary">📅 Calendar</button>
+          <button id="gpa-saved-view-folders" class="gpa-btn saved-view-btn">🗂 Folders</button>
+          <button id="gpa-saved-new-folder" class="gpa-btn" style="display:none;">＋ New folder</button>
+        </div>
+        <div class="gpa-row" id="gpa-saved-cal-head" style="justify-content:space-between;">
+          <button id="gpa-cal-prev" class="gpa-btn" title="Previous month">‹</button>
+          <span id="gpa-cal-title" class="gpa-cal-title"></span>
+          <button id="gpa-cal-next" class="gpa-btn" title="Next month">›</button>
+        </div>
+        <div id="gpa-cal-grid" class="gpa-cal"></div>
+        <div id="gpa-folder-tree" class="gpa-folder-tree" style="display:none;"></div>
+        <div id="gpa-saved-day-label" class="gpa-sub" style="margin:8px 0 4px;"></div>
+        <div id="gpa-saved-list" class="gpa-chat" style="max-height:260px;"></div>
         <div class="gpa-sub" style="margin:12px 0 6px;">📝 Scratchpad — autosaved to your profile</div>
         <textarea id="gpa-scratch" class="gpa-sync-box" style="height:90px;" placeholder="Jot anything… it saves as you type."></textarea>
         <div class="gpa-row" style="margin-top:6px;">
@@ -495,6 +507,29 @@
           <button id="gpa-notes-q-btn" class="gpa-btn primary">Ask</button>
         </div>
         <div id="gpa-notes-chat" class="gpa-chat" style="max-height:220px;"></div>
+      </div>
+
+      <div id="gpa-save-modal" class="gpa-modal" style="display:none;">
+        <div class="gpa-modal-card">
+          <div class="gpa-modal-title" id="gpa-save-modal-title">💾 Save insight</div>
+          <label for="gpa-save-label">Label (optional)</label>
+          <input id="gpa-save-label" placeholder="e.g. History, Exam prep, Recipes…" />
+          <label for="gpa-save-folder">Section (folder)</label>
+          <div class="gpa-row">
+            <select id="gpa-save-folder"></select>
+            <button id="gpa-save-folder-new" class="gpa-btn" title="Create a new folder">＋</button>
+          </div>
+          <label for="gpa-save-file">File (subfolder, optional)</label>
+          <div class="gpa-row">
+            <select id="gpa-save-file"></select>
+            <button id="gpa-save-file-new" class="gpa-btn" title="Create a new file in this folder">＋</button>
+          </div>
+          <div id="gpa-save-when" class="gpa-sub"></div>
+          <div class="gpa-row" style="margin-top:4px;">
+            <button id="gpa-save-ok" class="gpa-btn primary" style="flex:1;">Save</button>
+            <button id="gpa-save-cancel" class="gpa-btn" style="flex:1;">Cancel</button>
+          </div>
+        </div>
       </div>
 
       <div class="gpa-pane" data-pane="theme">
@@ -1379,6 +1414,50 @@
       .gpa-pomo-time { font-size: 22px; font-weight: 700; letter-spacing: 2px; font-family: 'JetBrains Mono', ui-monospace, monospace; }
       .gpa-flash-once { animation: gpa-flash 1.2s ease-in-out 3; }
       @keyframes gpa-flash { 0%, 100% { outline: none; } 50% { outline: 3px solid ${t.accent}; outline-offset: 2px; } }
+
+      /* ---- Saved tab: calendar + folders + save modal ---- */
+      .gpa-cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; margin-top: 6px; }
+      .gpa-cal-dow { text-align: center; font-size: 9px; color: ${t.sub}; padding: 2px 0; letter-spacing: 1px; }
+      .gpa-cal-day {
+        position: relative; min-height: 34px; padding: 3px 4px; text-align: left;
+        border: 1px solid ${t.border}; border-radius: 6px; background: ${t.field};
+        color: ${t.text}; font-size: 10.5px; cursor: pointer; font-family: inherit;
+      }
+      .gpa-cal-day:hover { border-color: ${t.accent}; }
+      .gpa-cal-day.pad { visibility: hidden; cursor: default; }
+      .gpa-cal-day.thisweek { background: ${t.accent}14; }
+      .gpa-cal-day.today { border-color: ${t.accent}; box-shadow: 0 0 0 1px ${t.accent}66 inset; font-weight: 700; }
+      .gpa-cal-day.sel { background: ${t.accent}33; border-color: ${t.accent}; }
+      .gpa-cal-day .dot { position: absolute; bottom: 2px; left: 0; right: 0; text-align: center; font-size: 7px; color: ${t.accent}; line-height: 1; }
+      .gpa-cal-title { font-size: 12px; font-weight: 700; letter-spacing: 1px; text-align: center; flex: 1; }
+      .gpa-folder-tree { display: flex; flex-direction: column; gap: 5px; margin-top: 6px; }
+      .gpa-folder-chip {
+        display: flex; align-items: center; gap: 6px; text-align: left; width: 100%;
+        border: 1px solid ${t.border}; border-radius: 8px; background: ${t.field};
+        color: ${t.text}; font-size: 11px; padding: 7px 9px; cursor: pointer; font-family: inherit;
+      }
+      .gpa-folder-chip:hover { border-color: ${t.accent}; }
+      .gpa-folder-chip.sel { background: ${t.accent}26; border-color: ${t.accent}; }
+      .gpa-folder-chip .grow { flex: 1; text-align: left; }
+      .gpa-folder-chip .mini { background: transparent; border: none; color: ${t.sub}; cursor: pointer; font-size: 10px; padding: 2px; font-family: inherit; }
+      .gpa-folder-chip .mini:hover { color: ${t.text}; }
+      .gpa-insight-card { position: relative; }
+      .gpa-insight-time { font-size: 10px; font-weight: 700; color: ${t.accent}; letter-spacing: 0.5px; }
+      .gpa-insight-label { display: inline-block; font-size: 9px; font-weight: 700; padding: 2px 7px; border-radius: 999px; border: 1px solid ${t.accent}; color: ${t.accent}; margin-left: 6px; letter-spacing: 0.5px; }
+      .gpa-insight-actions { display: flex; gap: 4px; margin-top: 6px; }
+      .gpa-insight-actions .gpa-btn { font-size: 9px; padding: 4px 8px; flex: none; }
+      .gpa-modal { position: fixed; inset: 0; z-index: 2147483647; background: rgba(0, 0, 0, 0.55); display: flex; align-items: center; justify-content: center; }
+      .gpa-modal-card {
+        width: min(92vw, 330px); background: ${t.panel}; border: 1px solid ${t.accent};
+        border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 7px;
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+      }
+      .gpa-modal-title { font-size: 12px; font-weight: 700; letter-spacing: 1px; margin-bottom: 2px; }
+      .gpa-modal-card label { font-size: 10px; color: ${t.sub}; letter-spacing: 0.5px; }
+      .gpa-modal-card input, .gpa-modal-card select {
+        background: ${t.field}; border: 1px solid ${t.border}; border-radius: 6px;
+        color: ${t.text}; font-size: 12px; padding: 6px 8px; font-family: inherit; width: 100%;
+      }
     `;
     if (typeof applyMiniColorMode === 'function') applyMiniColorMode();
   }
@@ -2316,38 +2395,390 @@
     list.forEach((s) => { if (typeof s === 'string') highlightSnippetOnPage(s); });
   }
 
-  function saveInsight(text) {
-    const saved = JSON.parse(localStorage.getItem('gpa_saved_insights') || '[]');
-    saved.push({
-      text,
-      url: window.location.href,
-      title: document.title,
-      date: new Date().toLocaleString()
+  // ---- Saved insights: calendar + folders -----------------------------------
+  // Two ways in, no endless scroller: a themed month calendar (current week
+  // tinted, dots on days with insights, click a day for its timestamped
+  // cards) or a folder tree (folders → files/subfolders). Saving always asks
+  // where via the modal: label + section + file. Data stays in
+  // gpa_saved_insights (enriched with id/ts/folder/file/label on first load)
+  // and gpa_saved_folders — both profile-synced like every other gpa_* key.
+  const FOLDERS_KEY = 'gpa_saved_folders';
+  let savedView = localStorage.getItem('gpa_saved_view') || 'calendar';
+  let selFolder = '';
+  let calBase = null;   // first day of the visible month
+  let selDay = null;    // selected calendar day
+
+  function savedAll() {
+    const arr = JSON.parse(localStorage.getItem('gpa_saved_insights') || '[]');
+    let changed = false;
+    arr.forEach((it) => {
+      // Enrich older insights (pre-calendar format) once.
+      if (!it.id) { it.id = 'i' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); changed = true; }
+      if (!it.ts) { const d = it.date ? new Date(it.date) : null; it.ts = d && !isNaN(d.getTime()) ? d.getTime() : Date.now(); changed = true; }
+      if (it.folder === undefined) { it.folder = ''; changed = true; }
+      if (it.file === undefined) { it.file = ''; changed = true; }
+      if (it.label === undefined) { it.label = ''; changed = true; }
     });
-    localStorage.setItem('gpa_saved_insights', JSON.stringify(saved));
-    alert('Insight saved to your profile!');
+    if (changed) saveSavedAll(arr);
+    return arr;
+  }
+  function saveSavedAll(arr) { localStorage.setItem('gpa_saved_insights', JSON.stringify(arr)); }
+  function savedFoldersList() { try { return JSON.parse(localStorage.getItem(FOLDERS_KEY) || '[]'); } catch (e) { return []; } }
+  function saveFoldersList(list) { localStorage.setItem(FOLDERS_KEY, JSON.stringify(list)); }
+  function folderName(id) {
+    if (!id) return 'Unfiled';
+    const f = savedFoldersList().find((x) => x.id === id);
+    return f ? f.name : 'Unfiled';
+  }
+  function updateInsight(id, mut) {
+    const arr = savedAll();
+    const it = arr.find((x) => x.id === id);
+    if (it) { mut(it); saveSavedAll(arr); }
+  }
+  function sameDay(a, b) { return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate(); }
+  function newFolderId() { return 'f' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+
+  function saveInsight(text) {
+    openSaveModal({ text });
   }
 
-  function renderSavedInsights() {
-    const listEl = panel.querySelector('#gpa-saved-list');
-    if (!listEl) return;
-    const saved = JSON.parse(localStorage.getItem('gpa_saved_insights') || '[]');
-    listEl.innerHTML = saved.length ? '' : '<div class="gpa-sub">No saved insights yet.</div>';
-    saved.reverse().forEach((it) => {
+  // ---- Save / move modal -----------------------------------------------------
+  let saveModalState = null; // {text} saves a new insight · {moveId} re-files one
+
+  function openSaveModal(state) {
+    saveModalState = state;
+    const labelInput = panel.querySelector('#gpa-save-label');
+    labelInput.value = '';
+    if (state.text) {
+      panel.querySelector('#gpa-save-modal-title').textContent = '💾 Save insight';
+      panel.querySelector('#gpa-save-when').textContent = `Will be saved: ${new Date().toLocaleString()}`;
+    } else {
+      panel.querySelector('#gpa-save-modal-title').textContent = '📂 Move insight';
+      const it = savedAll().find((x) => x.id === state.moveId);
+      labelInput.value = it ? (it.label || '') : '';
+      panel.querySelector('#gpa-save-when').textContent = it ? `Saved: ${new Date(it.ts).toLocaleString()}` : '';
+    }
+    panel.querySelector('#gpa-save-folder').value = '';
+    refreshSaveSelects();
+    if (!state.text) {
+      const it = savedAll().find((x) => x.id === state.moveId);
+      if (it) {
+        panel.querySelector('#gpa-save-folder').value = it.folder || '';
+        refreshSaveSelects();
+        panel.querySelector('#gpa-save-file').value = it.file || '';
+      }
+    }
+    panel.querySelector('#gpa-save-modal').style.display = 'flex';
+  }
+  function closeSaveModal() {
+    panel.querySelector('#gpa-save-modal').style.display = 'none';
+    saveModalState = null;
+  }
+  function refreshSaveSelects() {
+    const folders = savedFoldersList();
+    const folderSel = panel.querySelector('#gpa-save-folder');
+    const fileSel = panel.querySelector('#gpa-save-file');
+    const prev = folderSel.value;
+    folderSel.innerHTML = '';
+    let o = document.createElement('option');
+    o.value = ''; o.textContent = '📥 Unfiled';
+    folderSel.appendChild(o);
+    folders.filter((f) => !f.parent).forEach((f) => {
+      const opt = document.createElement('option');
+      opt.value = f.id; opt.textContent = '📁 ' + f.name;
+      folderSel.appendChild(opt);
+    });
+    if (prev && folders.some((f) => f.id === prev)) folderSel.value = prev;
+    fileSel.innerHTML = '';
+    o = document.createElement('option');
+    o.value = ''; o.textContent = '(no file)';
+    fileSel.appendChild(o);
+    folders.filter((f) => f.parent === folderSel.value).forEach((f) => {
+      const opt = document.createElement('option');
+      opt.value = f.id; opt.textContent = '📄 ' + f.name;
+      fileSel.appendChild(opt);
+    });
+    fileSel.closest('.gpa-row').style.display = folderSel.value ? 'flex' : 'none';
+    panel.querySelector('#gpa-save-file-new').style.display = folderSel.value ? 'inline-block' : 'none';
+  }
+  (function wireSaveModal() {
+    panel.querySelector('#gpa-save-folder').addEventListener('change', refreshSaveSelects);
+    panel.querySelector('#gpa-save-cancel').addEventListener('click', closeSaveModal);
+    panel.querySelector('#gpa-save-modal').addEventListener('click', (e) => {
+      if (e.target.id === 'gpa-save-modal') closeSaveModal();
+    });
+    panel.querySelector('#gpa-save-folder-new').addEventListener('click', () => {
+      const name = prompt('New folder name:');
+      if (!name) return;
+      const list = savedFoldersList();
+      const id = newFolderId();
+      list.push({ id, name: name.trim(), parent: '' });
+      saveFoldersList(list);
+      panel.querySelector('#gpa-save-folder').value = id;
+      refreshSaveSelects();
+    });
+    panel.querySelector('#gpa-save-file-new').addEventListener('click', () => {
+      const parent = panel.querySelector('#gpa-save-folder').value;
+      if (!parent) return;
+      const name = prompt(`New file name inside "${folderName(parent)}":`);
+      if (!name) return;
+      const list = savedFoldersList();
+      const id = newFolderId();
+      list.push({ id, name: name.trim(), parent });
+      saveFoldersList(list);
+      panel.querySelector('#gpa-save-file').value = id;
+      refreshSaveSelects();
+    });
+    panel.querySelector('#gpa-save-ok').addEventListener('click', () => {
+      const folder = panel.querySelector('#gpa-save-folder').value;
+      const file = panel.querySelector('#gpa-save-file').value;
+      const label = panel.querySelector('#gpa-save-label').value.trim();
+      if (saveModalState && saveModalState.text) {
+        const arr = savedAll();
+        arr.push({
+          id: 'i' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+          text: saveModalState.text,
+          url: window.location.href,
+          title: document.title,
+          date: new Date().toLocaleString(),
+          ts: Date.now(),
+          folder, file, label
+        });
+        saveSavedAll(arr);
+      } else if (saveModalState && saveModalState.moveId) {
+        updateInsight(saveModalState.moveId, (it) => { it.folder = folder; it.file = file; it.label = label; });
+      }
+      closeSaveModal();
+      const pane = panel.querySelector('.gpa-pane[data-pane="saved"]');
+      if (pane && pane.classList.contains('active')) renderSavedInsights();
+    });
+  })();
+
+  // ---- Insight cards (shared by both views) ----------------------------------
+  function renderInsightCards(listEl, items) {
+    listEl.innerHTML = '';
+    if (!items.length) {
+      listEl.innerHTML = '<div class="gpa-sub">Nothing here yet.</div>';
+      return;
+    }
+    items.slice().sort((a, b) => b.ts - a.ts).forEach((it) => {
       const div = document.createElement('div');
-      div.className = 'gpa-msg ai';
+      div.className = 'gpa-msg ai gpa-insight-card';
       div.style.marginBottom = '8px';
+      const time = new Date(it.ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      const placeTxt = it.folder
+        ? ` <span style="opacity:0.6;">(🗂 ${escapeHtml(folderName(it.folder))}${it.file ? ' › ' + escapeHtml(folderName(it.file)) : ''})</span>`
+        : '';
       div.innerHTML = `
-        <div class="gpa-sub" style="font-weight:700; margin-bottom:4px;">${escapeHtml(it.title)}</div>
-        <div style="font-size:11px; margin-bottom:6px;">${escapeHtml(it.text)}</div>
-        <div class="gpa-row" style="justify-content:space-between; font-size:9px; opacity:0.7;">
-          <span>${it.date}</span>
-          <a href="${it.url}" target="_blank" style="color:${THEMES[theme].accent}; text-decoration:none;">Visit Page</a>
+        <div class="gpa-row" style="justify-content:space-between; font-size:9px; opacity:0.9;">
+          <span class="gpa-insight-time">🕒 ${escapeHtml(time)}${it.label ? '<span class="gpa-insight-label">' + escapeHtml(it.label) + '</span>' : ''}</span>
+          <a href="${it.url}" target="_blank" style="color:${THEMES[theme].accent}; text-decoration:none; font-size:9px;">Visit Page</a>
         </div>
+        <div class="gpa-sub" style="font-weight:700; margin:4px 0;">${escapeHtml(it.title)}${placeTxt}</div>
+        <div style="font-size:11px; margin-bottom:2px;">${escapeHtml(it.text)}</div>
       `;
+      const actions = document.createElement('div');
+      actions.className = 'gpa-insight-actions';
+      const lab = document.createElement('button');
+      lab.className = 'gpa-btn';
+      lab.textContent = '🏷 Label';
+      lab.addEventListener('click', () => {
+        const v = prompt('Label for this insight:', it.label || '');
+        if (v === null) return;
+        updateInsight(it.id, (x) => { x.label = v.trim(); });
+        renderSavedInsights();
+      });
+      const move = document.createElement('button');
+      move.className = 'gpa-btn';
+      move.textContent = '📂 Move';
+      move.addEventListener('click', () => openSaveModal({ moveId: it.id }));
+      const del = document.createElement('button');
+      del.className = 'gpa-btn';
+      del.textContent = '🗑';
+      del.addEventListener('click', () => {
+        if (!confirm('Delete this insight?')) return;
+        const arr = savedAll().filter((x) => x.id !== it.id);
+        saveSavedAll(arr);
+        renderSavedInsights();
+      });
+      actions.appendChild(lab);
+      actions.appendChild(move);
+      actions.appendChild(del);
+      div.appendChild(actions);
       listEl.appendChild(div);
     });
   }
+
+  // ---- Calendar view ----------------------------------------------------------
+  function renderCalendar() {
+    const grid = panel.querySelector('#gpa-cal-grid');
+    const titleEl = panel.querySelector('#gpa-cal-title');
+    const dayLabel = panel.querySelector('#gpa-saved-day-label');
+    const listEl = panel.querySelector('#gpa-saved-list');
+    if (!calBase) { const n = new Date(); calBase = new Date(n.getFullYear(), n.getMonth(), 1); }
+    if (!selDay) selDay = new Date();
+    const y = calBase.getFullYear(), m = calBase.getMonth();
+    titleEl.textContent = calBase.toLocaleString(undefined, { month: 'long', year: 'numeric' });
+    const items = savedAll();
+    const today = new Date();
+    const weekStart = new Date(today.getFullYear(), today.getMonth(), today.getDate() - today.getDay());
+    const weekEnd = new Date(weekStart); weekEnd.setDate(weekStart.getDate() + 6);
+    grid.innerHTML = '';
+    ['S', 'M', 'T', 'W', 'T', 'F', 'S'].forEach((d) => {
+      const h = document.createElement('div');
+      h.className = 'gpa-cal-dow';
+      h.textContent = d;
+      grid.appendChild(h);
+    });
+    for (let p = 0; p < new Date(y, m, 1).getDay(); p++) {
+      const pad = document.createElement('button');
+      pad.className = 'gpa-cal-day pad';
+      pad.disabled = true;
+      grid.appendChild(pad);
+    }
+    const daysIn = new Date(y, m + 1, 0).getDate();
+    for (let d = 1; d <= daysIn; d++) {
+      const day = new Date(y, m, d);
+      const b = document.createElement('button');
+      b.className = 'gpa-cal-day';
+      b.textContent = d;
+      if (day >= weekStart && day <= weekEnd) b.classList.add('thisweek');
+      if (sameDay(day, today)) b.classList.add('today');
+      if (selDay && sameDay(day, selDay)) b.classList.add('sel');
+      const count = items.filter((it) => sameDay(new Date(it.ts), day)).length;
+      if (count) {
+        b.title = count + ' insight(s) on ' + (m + 1) + '/' + d;
+        const dot = document.createElement('span');
+        dot.className = 'dot';
+        dot.textContent = '●';
+        b.appendChild(dot);
+      }
+      b.addEventListener('click', () => { selDay = day; renderCalendar(); });
+      grid.appendChild(b);
+    }
+    const dayItems = items.filter((it) => sameDay(new Date(it.ts), selDay));
+    dayLabel.textContent = `📅 ${selDay.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' })} — ${dayItems.length} insight${dayItems.length === 1 ? '' : 's'}`;
+    renderInsightCards(listEl, dayItems);
+  }
+
+  // ---- Folder tree view ---------------------------------------------------------
+  function renderFolderTree() {
+    const tree = panel.querySelector('#gpa-folder-tree');
+    const dayLabel = panel.querySelector('#gpa-saved-day-label');
+    const listEl = panel.querySelector('#gpa-saved-list');
+    const items = savedAll();
+    const folders = savedFoldersList();
+    tree.innerHTML = '';
+
+    function chip(label, id, isFile) {
+      const row = document.createElement('div');
+      row.className = 'gpa-folder-chip' + (selFolder === id ? ' sel' : '');
+      const main = document.createElement('button');
+      main.className = 'mini grow';
+      main.style.fontSize = '11px';
+      main.style.background = 'transparent';
+      main.style.border = 'none';
+      main.style.color = 'inherit';
+      main.textContent = (isFile ? '　📄 ' : '📁 ') + label + '  (' + items.filter((it) => it.folder === id).length + ')';
+      main.addEventListener('click', () => { selFolder = id; renderFolderTree(); });
+      row.appendChild(main);
+      if (id) {
+        const del = document.createElement('button');
+        del.className = 'mini';
+        del.textContent = '🗑';
+        del.title = 'Delete ' + (isFile ? 'file' : 'folder');
+        del.addEventListener('click', () => {
+          if (!confirm(`Delete "${label}"? Its insights move to Unfiled.`)) return;
+          saveFoldersList(savedFoldersList().filter((f) => f.id !== id && f.parent !== id));
+          updateInsightForAll(id);
+          if (selFolder === id) selFolder = '';
+          renderFolderTree();
+        });
+        row.appendChild(del);
+        if (!isFile) {
+          const add = document.createElement('button');
+          add.className = 'mini';
+          add.textContent = '＋ file';
+          add.title = 'New file inside';
+          add.addEventListener('click', () => {
+            const name = prompt(`New file name inside "${label}":`);
+            if (!name) return;
+            const list = savedFoldersList();
+            list.push({ id: newFolderId(), name: name.trim(), parent: id });
+            saveFoldersList(list);
+            renderFolderTree();
+          });
+          row.appendChild(add);
+        }
+      }
+      return row;
+    }
+    function updateInsightForAll(id) {
+      const arr = savedAll();
+      arr.forEach((it) => { if (it.folder === id) it.folder = ''; });
+      saveSavedAll(arr);
+    }
+
+    tree.appendChild(chip('Unfiled', '', false));
+    folders.filter((f) => !f.parent).forEach((f) => {
+      tree.appendChild(chip(f.name, f.id, false));
+      folders.filter((s) => s.parent === f.id).forEach((s) => {
+        const sub = chip(s.name, s.id, true);
+        sub.style.marginLeft = '16px';
+        tree.appendChild(sub);
+      });
+    });
+
+    const labelTxt = selFolder ? folderName(selFolder) : 'Unfiled';
+    const folderItems = items.filter((it) => it.folder === selFolder);
+    dayLabel.textContent = `🗂 ${labelTxt} — ${folderItems.length} insight${folderItems.length === 1 ? '' : 's'}`;
+    renderInsightCards(listEl, folderItems);
+  }
+
+  // ---- Saved tab master render ----------------------------------------------------
+  function renderSavedInsights() {
+    const calBtn = panel.querySelector('#gpa-saved-view-cal');
+    const foldBtn = panel.querySelector('#gpa-saved-view-folders');
+    const newBtn = panel.querySelector('#gpa-saved-new-folder');
+    const calHead = panel.querySelector('#gpa-saved-cal-head');
+    const grid = panel.querySelector('#gpa-cal-grid');
+    const tree = panel.querySelector('#gpa-folder-tree');
+    const isCal = savedView === 'calendar';
+    calBtn.classList.toggle('primary', isCal);
+    foldBtn.classList.toggle('primary', !isCal);
+    grid.style.display = isCal ? 'grid' : 'none';
+    calHead.style.display = isCal ? 'flex' : 'none';
+    tree.style.display = isCal ? 'none' : 'flex';
+    newBtn.style.display = isCal ? 'none' : 'inline-block';
+    if (isCal) renderCalendar(); else renderFolderTree();
+  }
+  panel.querySelector('#gpa-saved-view-cal').addEventListener('click', () => {
+    savedView = 'calendar';
+    localStorage.setItem('gpa_saved_view', savedView);
+    renderSavedInsights();
+  });
+  panel.querySelector('#gpa-saved-view-folders').addEventListener('click', () => {
+    savedView = 'folders';
+    localStorage.setItem('gpa_saved_view', savedView);
+    renderSavedInsights();
+  });
+  panel.querySelector('#gpa-saved-new-folder').addEventListener('click', () => {
+    const name = prompt('New folder name:');
+    if (!name) return;
+    const list = savedFoldersList();
+    list.push({ id: newFolderId(), name: name.trim(), parent: '' });
+    saveFoldersList(list);
+    selFolder = '';
+    renderFolderTree();
+  });
+  panel.querySelector('#gpa-cal-prev').addEventListener('click', () => {
+    calBase = new Date(calBase.getFullYear(), calBase.getMonth() - 1, 1);
+    renderCalendar();
+  });
+  panel.querySelector('#gpa-cal-next').addEventListener('click', () => {
+    calBase = new Date(calBase.getFullYear(), calBase.getMonth() + 1, 1);
+    renderCalendar();
+  });
 
   async function autoFillForm() {
     const inputs = Array.from(document.querySelectorAll('input:not([type="hidden"]), textarea, select'));
