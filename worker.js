@@ -33,6 +33,16 @@ export default {
       const m = await kv.get('mod:' + String(user).toLowerCase(), 'json');
       return m || { state: 'active', reason: '', kickNonce: 0 };
     };
+    const sha256hex = async (str) => {
+      const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+      return [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, '0')).join('');
+    };
+    // Human-friendly code: uppercase, no 0/O/1/I/L ambiguity.
+    const genCode = () => {
+      const chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+      const a = new Uint8Array(8); crypto.getRandomValues(a);
+      return [...a].map((x) => chars[x % chars.length]).join('');
+    };
 
     if (req.method === 'OPTIONS') {
       return new Response(null, { status: 204, headers: cors });
@@ -129,6 +139,52 @@ export default {
       cur.updatedAt = Date.now();
       await kv.put(key, JSON.stringify(cur));
       return json({ ok: true, user, mod: cur });
+    }
+
+    // Owner mints a one-time unlock code for ONE user. We store only its hash,
+    // and hand the plaintext back this once for the owner to pass along. The
+    // code releases only this username's block, and is consumed on use.
+    if (url.pathname === '/admin/setunlock' && req.method === 'POST') {
+      const kv = env && env.TELEMETRY;
+      const ADMIN = (env && env.ADMIN_TOKEN) || '';
+      if (!kv) return json({ error: 'telemetry KV not bound' }, 500);
+      if (!ADMIN || (url.searchParams.get('token') || '') !== ADMIN) return json({ error: 'unauthorized' }, 401);
+      let body = {};
+      try { body = JSON.parse(await req.text()); } catch (e) { /* tolerate */ }
+      const user = String(body.user || '').toLowerCase().slice(0, 80);
+      if (!user) return json({ error: 'no user' }, 400);
+      const key = 'mod:' + user;
+      const cur = (await kv.get(key, 'json')) || { state: 'active', reason: '', kickNonce: 0 };
+      const code = genCode();
+      cur.unlock = await sha256hex(user + '|' + code);   // only the hash is stored
+      cur.unlockAt = Date.now();
+      await kv.put(key, JSON.stringify(cur));
+      return json({ ok: true, user, code });
+    }
+
+    // A blocked user redeems the code the owner gave them. Not token-gated —
+    // knowing the code is the credential. Only flips this one username, and
+    // only when the code matches; the code is single-use.
+    if (url.pathname === '/unlock' && req.method === 'POST') {
+      const kv = env && env.TELEMETRY;
+      if (!kv) return json({ ok: false, error: 'telemetry KV not bound' }, 200);
+      let body = {};
+      try { body = JSON.parse(await req.text()); } catch (e) { /* tolerate */ }
+      const user = String(body.user || '').toLowerCase().slice(0, 80);
+      const code = String(body.code || '').trim().toUpperCase();
+      if (!user || !code) return json({ ok: false, error: 'missing user or code' }, 200);
+      const key = 'mod:' + user;
+      const cur = await kv.get(key, 'json');
+      if (!cur || !cur.unlock) return json({ ok: false, error: 'no unlock code set for this user' }, 200);
+      const h = await sha256hex(user + '|' + code);
+      if (h !== cur.unlock) return json({ ok: false, error: 'invalid code' }, 200);
+      cur.state = 'active';
+      cur.reason = '';
+      delete cur.unlock;            // single use
+      delete cur.unlockAt;
+      cur.updatedAt = Date.now();
+      await kv.put(key, JSON.stringify(cur));
+      return json({ ok: true, state: 'active' });
     }
 
     if (url.pathname === '/admin/summary' && req.method === 'GET') {
