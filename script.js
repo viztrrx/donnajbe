@@ -837,7 +837,10 @@
         font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, 'Courier New', monospace;
       }
       .gpa-output {
-        margin-top: 6px; flex: 0 1 auto; min-height: 0; max-height: 260px; overflow-y: auto;
+        /* flex-shrink: 0 — inside the scrolling pane this box must size to
+           its content (up to max-height), or rows of buttons below/above
+           squeeze it down to a single visible line. */
+        margin-top: 6px; flex: 0 0 auto; max-height: 260px; overflow-y: auto;
         font-size: 12.5px; line-height: 1.6; white-space: pre-wrap;
         overflow-wrap: break-word; word-break: break-word;
         font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, 'Courier New', monospace;
