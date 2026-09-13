@@ -64,20 +64,62 @@ export default {
     }
 
     // ---- /v1/* : forward to OpenAI ----
-    // Authorization first, but if the browser's wrapper stripped it, fall
-    // back to the ?key= query parameter (survives header-stripping wrappers)
-    // and then the X-GPA-Key backup header the panel sends.
-    const keyParam = url.searchParams.get('key');
-    const authHeader = req.headers.get('Authorization')
-      || (keyParam ? `Bearer ${keyParam}` : null)
-      || (req.headers.get('X-GPA-Key') ? `Bearer ${req.headers.get('X-GPA-Key')}` : null);
+    // The key can arrive four ways, tried in this order:
+    //   1. a normal Authorization header
+    //   2. the X-GPA-Key header    — for pages that rewrite Authorization
+    //   3. a _gpa_key field in the JSON body — for pages whose wrappers strip
+    //      custom headers too. Preferred over a query parameter because a key
+    //      in a URL leaks into browser history, Referer headers, proxy/CDN
+    //      logs and screenshots; a key in a body leaks into none of those.
+    //   4. ?key= in the query string — legacy, still accepted so an older
+    //      copy of script.js keeps working, but it should be considered
+    //      compromised once used and rotated.
+    let bodyText;
+    let keyFromBody = '';
+
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      bodyText = await req.text();
+      if (bodyText) {
+        try {
+          const parsed = JSON.parse(bodyText);
+          if (parsed && typeof parsed._gpa_key === 'string') {
+            keyFromBody = parsed._gpa_key;
+            delete parsed._gpa_key;          // never forward it upstream
+            bodyText = JSON.stringify(parsed);
+          }
+        } catch (e) { /* not JSON — forward untouched */ }
+      }
+    }
+
+    // A header value may only contain printable ASCII. If a key picked up an
+    // invisible character somewhere (a zero-width space pasted in with it, a
+    // stray newline), passing it straight to fetch throws a TypeError and the
+    // whole worker 500s. Strip it here so the request still goes through.
+    const strip = (v) => (v ? String(v).replace(/[^\x21-\x7E]/g, '') : '');
+    const bearer = strip((req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, ''))
+      || strip(req.headers.get('X-GPA-Key'))
+      || strip(keyFromBody)
+      || strip(url.searchParams.get('key'));
+
+    // Without this, a missing key was forwarded as the literal header
+    // "Authorization: null", and OpenAI's reply ("You didn't provide an API
+    // key") made it look like the key itself was at fault.
+    if (!bearer) {
+      return new Response(JSON.stringify({
+        error: {
+          message: 'No API key reached the proxy. The page is probably stripping headers — make sure script.js and worker.js are both up to date, since the key channel they agree on changed.',
+          type: 'agent_console_no_key'
+        }
+      }), { status: 401, headers: { ...cors, 'Content-Type': 'application/json' } });
+    }
+
     const res = await fetch('https://api.openai.com' + url.pathname, {
       method: req.method,
       headers: {
-        'Authorization': authHeader,
+        'Authorization': `Bearer ${bearer}`,
         'Content-Type': 'application/json'
       },
-      body: req.method !== 'GET' ? req.body : undefined
+      body: bodyText
     });
     const r = new Response(res.body, res);
     r.headers.set('Access-Control-Allow-Origin', '*');
