@@ -98,6 +98,19 @@
   // Set to '' to call OpenAI directly.
   const OPENAI_PROXY = 'https://donnajbe.viztrrx.workers.dev';
   const PROVIDER_KEY = 'gpa_ai_provider';
+  // Tells the AI what it is and what the console can do, so questions like
+  // "what can you do?" get a real answer. Injected into the chat-facing
+  // system prompts (Ask AI + page Q&A), not into the JSON-only ones.
+  const CAPABILITIES_BRIEF = [
+    'ABOUT YOU: You are the AI inside "Agent Console", a floating assistant panel the user runs on any web page.',
+    'Its features: PAGE INSIGHTS — reads the current page\'s text and/or a screenshot, summarizes, analyzes, answers questions about the page, solves quizzes and multiple-choice questions found on the page (answer grid with highlights on the page), auto-fills form fields with mock values, extracts tables to CSV, watches the page for changes the user cares about, and follows natural-language page commands like "click the third link".',
+    'ASK AI — general chat like this conversation, with voice input and spoken answers.',
+    'MUSIC — plays songs via YouTube search, SoundCloud links, or a local audio library.',
+    'BROWSER — embeds other sites in a frame, plus research mode that reads sources automatically and writes a cited brief.',
+    'STUDY — generates flashcard decks from the current page with spaced practice.',
+    'SAVED — saved insights, an autosaved scratchpad, and a pomodoro timer.',
+    'When the user asks what you can do, describe these features briefly and naturally and point them to the right tab. You do not automatically see the page text in this conversation — for page-specific questions, Page Insights is the tab to use.'
+  ].join(' ');
   const SPEED_KEY = 'gpa_type_speed';
   const FONT_KEY = 'gpa_response_font';
   const ICON_KEY = 'gpa_mini_icon';
@@ -2619,7 +2632,7 @@
     if (!pageText && !screenshotDataUrl) { scanOutput.textContent = 'Scan the page or capture the screen first.'; return; }
     scanOutput.textContent = 'Thinking…';
     try {
-      const sys = 'Answer the question using ONLY the provided context (page text and/or screenshot). Before finalizing, double-check your answer against the context. If — and only if — the question is asking for answers to multiple numbered items (like a quiz, worksheet, or multiple-choice list), respond with ONLY a JSON array and nothing else, in exactly this shape: [{"q":"1","a":"B","c":90,"h":"exact verbatim phrase from PAGE TEXT near this question"}] — "q" is the item number/label as a string, "a" is the short answer, "c" is your confidence (0-100), "h" is a short exact quote (copied verbatim from PAGE TEXT, not paraphrased) that pinpoints where that question/answer appears, one object per item, no extra commentary. For any other kind of question, answer in brief plain sentences with no markdown formatting (no asterisks, headers, or lists), then two more lines: first exactly "CONFIDENCE: NN" (0-100, your confidence the answer is correct), then exactly "HIGHLIGHT: " followed by a short exact verbatim quote from PAGE TEXT that contains or supports the answer (empty if none applies). If the answer is not in the content, say so in one short sentence and use a low confidence number.';
+      const sys = 'You are the AI inside the user\'s "Agent Console" panel, answering about the web page they are viewing. ' + CAPABILITIES_BRIEF + ' Answer the question using ONLY the provided context (page text and/or screenshot). Before finalizing, double-check your answer against the context. If — and only if — the question is asking for answers to multiple numbered items (like a quiz, worksheet, or multiple-choice list), respond with ONLY a JSON array and nothing else, in exactly this shape: [{"q":"1","a":"B","c":90,"h":"exact verbatim phrase from PAGE TEXT near this question"}] — "q" is the item number/label as a string, "a" is the short answer, "c" is your confidence (0-100), "h" is a short exact quote (copied verbatim from PAGE TEXT, not paraphrased) that pinpoints where that question/answer appears, one object per item, no extra commentary. For any other kind of question, answer in brief plain sentences with no markdown formatting (no asterisks, headers, or lists), then two more lines: first exactly "CONFIDENCE: NN" (0-100, your confidence the answer is correct), then exactly "HIGHLIGHT: " followed by a short exact verbatim quote from PAGE TEXT that contains or supports the answer (empty if none applies). If the answer is not in the content, say so in one short sentence and use a low confidence number.';
       const textPart = `${pageText ? `PAGE TEXT:\n${pageText}\n\n` : ''}QUESTION:\n${q}`;
       const images = screenshotDataUrl ? [screenshotDataUrl] : null;
       const out = await callAI(textPart, sys, images);
@@ -2858,7 +2871,7 @@
     chatEl.appendChild(thinking);
     chatEl.scrollTop = chatEl.scrollHeight;
     try {
-      const sys = 'You are a helpful, concise assistant. Reply in plain conversational sentences only — no markdown formatting (no asterisks, headers, or lists) since this is shown as plain text. Keep answers as short as possible while still being useful. Then, on its own final line, write exactly "CONFIDENCE: NN" where NN (0-100) is your confidence that the answer is accurate.';
+      const sys = 'You are a helpful, concise assistant. ' + CAPABILITIES_BRIEF + ' Reply in plain conversational sentences only — no markdown formatting (no asterisks, headers, or lists) since this is shown as plain text. Keep answers as short as possible while still being useful. Then, on its own final line, write exactly "CONFIDENCE: NN" where NN (0-100) is your confidence that the answer is accurate.';
       const out = await callAI(q, sys);
       const { text: cleanText, confidence } = extractConfidenceLine(out);
       typeText(thinking, cleanText, chatEl, () => { appendConfidenceBadge(thinking, confidence); speak(cleanText); });
