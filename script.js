@@ -108,6 +108,7 @@
     'MUSIC — plays songs via YouTube search, SoundCloud links, or a local audio library.',
     'BROWSER — embeds other sites in a frame, plus research mode that reads sources automatically and writes a cited brief.',
     'STUDY — generates flashcard decks from the current page with spaced practice.',
+    'NOTES — the user pastes a passage; the AI reads it, researches it across the web, writes organized study notes, and then remembers the passage, notes and research so follow-up questions about the text are answered with full context.',
     'SAVED — saved insights, an autosaved scratchpad, and a pomodoro timer.',
     'When the user asks what you can do, describe these features briefly and naturally and point them to the right tab. You do not automatically see the page text in this conversation — for page-specific questions, Page Insights is the tab to use.'
   ].join(' ');
@@ -289,6 +290,7 @@
           <button class="gpa-dropdown-item" data-tab="browser">Browser</button>
           <button class="gpa-dropdown-item" data-tab="games">Games</button>
           <button class="gpa-dropdown-item" data-tab="study">Study</button>
+          <button class="gpa-dropdown-item" data-tab="notes">Notes</button>
           <button class="gpa-dropdown-item" data-tab="saved">Saved</button>
           <button class="gpa-dropdown-item" data-tab="theme">Settings</button>
         </div>
@@ -475,6 +477,24 @@
         </div>
         <div id="gpa-fc-status" class="gpa-sub" style="margin-bottom:6px;">Open a page with material on it, then generate a deck. Cards you "knew" three times are retired until you reset.</div>
         <div id="gpa-fc-study"></div>
+      </div>
+
+      <div class="gpa-pane" data-pane="notes">
+        <div class="gpa-row">
+          <textarea id="gpa-notes-input" class="gpa-sync-box" style="height:100px;" placeholder="Paste a passage here — article, chapter, story, lecture… Then press Enter (Shift+Enter makes a new line)."></textarea>
+        </div>
+        <div class="gpa-row">
+          <button id="gpa-notes-go" class="gpa-btn primary">📝 Read, research &amp; make notes</button>
+          <button id="gpa-notes-new" class="gpa-btn" style="display:none;">🗑 Clear &amp; start new</button>
+        </div>
+        <div id="gpa-notes-status" class="gpa-sub" style="margin-bottom:6px;">The AI reads the passage, researches it across the web, and writes organized notes — then remembers it all so you can ask follow-ups below.</div>
+        <div id="gpa-notes-out" class="gpa-output"></div>
+        <div class="gpa-sub" style="margin:10px 0 4px;">💬 Ask about this passage — it remembers the text, the notes and the research</div>
+        <div class="gpa-row" id="gpa-notes-q-row" style="display:none;">
+          <input id="gpa-notes-q" class="gpa-input" placeholder="Ask anything about the passage…" />
+          <button id="gpa-notes-q-btn" class="gpa-btn primary">Ask</button>
+        </div>
+        <div id="gpa-notes-chat" class="gpa-chat" style="max-height:220px;"></div>
       </div>
 
       <div class="gpa-pane" data-pane="theme">
@@ -3448,6 +3468,164 @@
     } catch (e) {
       showError(out, e, currentProviderLabel());
     }
+  });
+
+  // ---- Notes maker (Notes tab) ----------------------------------------------
+  // Paste a passage → the AI reads it (title included), extracts structure,
+  // researches it across the web through the worker, and writes neat
+  // organized notes. The passage, notes, research excerpts and follow-up
+  // chat are all kept in gpa_notes_state, so follow-up questions have full
+  // context until you clear it — and it syncs with your profile.
+  const NOTES_KEY = 'gpa_notes_state';
+  let notesState = null;
+  try { notesState = JSON.parse(localStorage.getItem(NOTES_KEY) || 'null'); } catch (e) { notesState = null; }
+
+  function saveNotesState() {
+    if (notesState) localStorage.setItem(NOTES_KEY, JSON.stringify(notesState));
+  }
+
+  function notesMsg(role, text) {
+    const chat = panel.querySelector('#gpa-notes-chat');
+    const div = document.createElement('div');
+    div.className = 'gpa-msg ' + role;
+    div.textContent = text;
+    chat.appendChild(div);
+    chat.scrollTop = chat.scrollHeight;
+    return div;
+  }
+
+  function restoreNotesView() {
+    if (!notesState || !notesState.notes) return;
+    const out = panel.querySelector('#gpa-notes-out');
+    const qRow = panel.querySelector('#gpa-notes-q-row');
+    const newBtn = panel.querySelector('#gpa-notes-new');
+    out.textContent = notesState.notes;
+    qRow.style.display = 'flex';
+    newBtn.style.display = 'inline-block';
+    (notesState.chat || []).forEach((m) => notesMsg(m.role, m.text));
+  }
+  restoreNotesView();
+
+  panel.querySelector('#gpa-notes-new').addEventListener('click', () => {
+    notesState = null;
+    localStorage.removeItem(NOTES_KEY);
+    panel.querySelector('#gpa-notes-out').innerHTML = '';
+    panel.querySelector('#gpa-notes-chat').innerHTML = '';
+    panel.querySelector('#gpa-notes-q-row').style.display = 'none';
+    panel.querySelector('#gpa-notes-new').style.display = 'none';
+    panel.querySelector('#gpa-notes-status').textContent = 'Cleared. Paste a new passage whenever you\'re ready.';
+  });
+
+  async function makeNotes() {
+    const input = panel.querySelector('#gpa-notes-input');
+    const status = panel.querySelector('#gpa-notes-status');
+    const out = panel.querySelector('#gpa-notes-out');
+    const raw = input.value.trim();
+    if (raw.length < 200) { status.textContent = 'Paste a longer passage first — a paragraph or more.'; return; }
+    if (!OPENAI_PROXY) { status.textContent = 'Research-backed notes need the worker proxy (OPENAI_PROXY) to be set.'; return; }
+    const passage = raw.slice(0, 16000);
+    const goBtn = panel.querySelector('#gpa-notes-go');
+    goBtn.disabled = true;
+    try {
+      // Pass 1 — read and structure the passage itself.
+      status.textContent = '📖 Reading and analyzing the passage…';
+      const sys1 = 'You analyze a passage for note-taking. Return ONLY JSON: {"title":"best title for the passage","summary":"3-4 sentence overview","key_events":["..."],"important_parts":["short verbatim or near-verbatim quotes that matter most"],"key_terms":["term — plain definition"],"research_queries":["3 web search queries that would find reliable background context about the passage\'s subject"]} — key_events ordered as they happen; if the passage has no events, use main points instead. No text outside the JSON.';
+      const out1 = await callAI(`PASSAGE:\n${passage}`, sys1);
+      const m1 = out1.match(/\{[\s\S]*\}/);
+      const info = JSON.parse(m1[0]);
+
+      // Pass 2 — research: AI already suggested queries; pick a page URL per
+      // query and read it through the worker (pages block browser fetches).
+      status.textContent = '🌐 Researching sources…';
+      const research = [];
+      const queries = (info.research_queries || []).slice(0, 3);
+      for (const qy of queries) {
+        try {
+          const pick = await callAI(`Suggest ONE specific, authoritative web page URL (direct article, docs or encyclopedia entry — not a search page) that best answers this research need: "${qy}". Respond ONLY with the URL string.`, 'You are a research librarian.');
+          const u = pick.trim().replace(/^["'\[\]]+|["'\[\]]+$/g, '');
+          if (!/^https?:\/\//i.test(u)) continue;
+          status.textContent = `🌐 Reading: ${u.slice(0, 70)}…`;
+          const r = await rawFetch(`${OPENAI_PROXY}/read?url=${encodeURIComponent(u)}`);
+          if (!r.ok) continue;
+          const html = await r.text();
+          const doc = new DOMParser().parseFromString(html, 'text/html');
+          doc.querySelectorAll('script,style,noscript,svg,nav,footer,header').forEach((el) => el.remove());
+          const txt = (doc.body.innerText || '').replace(/\s+\n/g, '\n').trim();
+          if (txt.length > 200) research.push({ url: u, text: txt.slice(0, 6000) });
+        } catch (e) { /* skip unreadable sources */ }
+      }
+
+      // Pass 3 — write the notes, passage first, research as background.
+      status.textContent = research.length ? `✍️ Writing notes (passage + ${research.length} source${research.length > 1 ? 's' : ''})…` : '✍️ Writing notes…';
+      const sys2 = 'You write study notes. Plain text only — no markdown symbols (no asterisks, #, or backticks). Use exactly these sections, each heading in CAPS on its own line:\nTITLE:\nOVERVIEW:\nKEY EVENTS:\nIMPORTANT PARTS:\nCONTEXT & BACKGROUND:\nKEY TERMS:\nQUICK FACTS:\nUnder KEY EVENTS use numbered lines. Under the other sections use "- " lines. IMPORTANT PARTS quotes the passage\'s own words where it matters and says briefly why each matters. CONTEXT & BACKGROUND uses the provided research (cite the source URL in parentheses at the end of each line you took from research) and notes where research contradicts or extends the passage. Keep every line tight and factual — notes, not an essay.';
+      const researchBody = research.map((s) => `SOURCE ${s.url}:\n${s.text}`).join('\n\n');
+      const out2 = await callAI(`PASSAGE:\n${passage}\n\nANALYSIS:\n${JSON.stringify(info)}\n\n${researchBody || 'RESEARCH: none available — base CONTEXT & BACKGROUND only on the passage and say research was unavailable.'}`, sys2);
+      const notes = stripConfidence(out2).trim();
+
+      notesState = {
+        title: info.title || 'Untitled passage',
+        passage,
+        notes,
+        research,
+        chat: [],
+        date: new Date().toLocaleString()
+      };
+      saveNotesState();
+      out.innerHTML = '';
+      const rep = document.createElement('div');
+      rep.className = 'gpa-msg ai';
+      out.appendChild(rep);
+      typeText(rep, notes, out, () => {
+        addSaveButton(rep, notes);
+        const qRow = panel.querySelector('#gpa-notes-q-row');
+        qRow.style.display = 'flex';
+        panel.querySelector('#gpa-notes-new').style.display = 'inline-block';
+        panel.querySelector('#gpa-notes-status').textContent = `Working with: "${notesState.title}" — ask follow-ups below, it has the whole passage in memory.`;
+        speak('Notes ready.');
+      });
+    } catch (e) {
+      showError(out, e, currentProviderLabel());
+      status.textContent = '';
+    }
+    goBtn.disabled = false;
+  }
+  panel.querySelector('#gpa-notes-go').addEventListener('click', makeNotes);
+  panel.querySelector('#gpa-notes-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); makeNotes(); }
+  });
+
+  // Follow-up questions — the AI answers from the stored passage, notes,
+  // research excerpts and recent chat history.
+  async function askNotesQuestion() {
+    const qInput = panel.querySelector('#gpa-notes-q');
+    const chat = panel.querySelector('#gpa-notes-chat');
+    const q = qInput.value.trim();
+    if (!q || !notesState || !notesState.notes) { if (!notesState) qInput.value = ''; return; }
+    notesMsg('user', q);
+    qInput.value = '';
+    const aiMsg = notesMsg('ai', 'Thinking…');
+    const history = (notesState.chat || []).slice(-8)
+      .map((m) => `${m.role === 'user' ? 'USER' : 'ASSISTANT'}: ${m.text}`)
+      .join('\n');
+    const researchText = (notesState.research || []).map((s) => `${s.url}:\n${s.text}`).join('\n\n').slice(0, 12000);
+    const sys = 'You answer questions about a passage the user is studying. For anything about the passage, rely on the PASSAGE, NOTES, RESEARCH and chat history — quote or paraphrase it accurately; if something is not covered there, say so plainly and answer generally if you can. Otherwise you are a helpful, concise assistant. Plain text only — no markdown symbols. End with a final line "CONFIDENCE: NN" (0-100).';
+    const userText = `PASSAGE (titled "${notesState.title}"):\n${notesState.passage}\n\nNOTES ALREADY WRITTEN:\n${notesState.notes}\n\nRESEARCH EXCERPTS:\n${researchText || '(none)'}\n\nRECENT CHAT:\n${history || '(none)'}\n\nNEW QUESTION: ${q}`;
+    try {
+      const out = await callAI(userText, sys);
+      const { text: cleanText, confidence } = extractConfidenceLine(out);
+      typeText(aiMsg, cleanText, chat, () => {
+        appendConfidenceBadge(aiMsg, confidence);
+        notesState.chat.push({ role: 'user', text: q }, { role: 'ai', text: cleanText });
+        if (notesState.chat.length > 24) notesState.chat = notesState.chat.slice(-16);
+        saveNotesState();
+      });
+    } catch (e) {
+      showError(aiMsg, e, currentProviderLabel());
+    }
+  }
+  panel.querySelector('#gpa-notes-q-btn').addEventListener('click', askNotesQuestion);
+  panel.querySelector('#gpa-notes-q').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') askNotesQuestion();
   });
 
   // ---- Profiles, save state & cross-device sync -----------------------------
