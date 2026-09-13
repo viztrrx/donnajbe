@@ -1908,7 +1908,7 @@
     const body = { contents: [{ role: 'user', parts }] };
     if (systemText) body.systemInstruction = { parts: [{ text: systemText }] };
 
-    const res = await fetch(`${API_BASE}${MODEL}:generateContent?key=${key}`, {
+    const res = await rawFetch(`${API_BASE}${MODEL}:generateContent?key=${key}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
@@ -1938,6 +1938,41 @@
     return key ? key.trim() : null;
   }
 
+  // Native fetch that bypasses the page's own monkey-patched window.fetch.
+  // Some sites (Quizlet/Edmentum is one) wrap window.fetch, and their
+  // wrapper can throw on our cross-origin API calls ("Invalid value"). A
+  // fresh about:blank iframe hands us an untouched copy of native fetch;
+  // if that's unavailable, fall back to XMLHttpRequest.
+  const rawFetch = (function () {
+    try {
+      const ifr = document.createElement('iframe');
+      ifr.style.display = 'none';
+      ifr.setAttribute('aria-hidden', 'true');
+      document.documentElement.appendChild(ifr);
+      if (ifr.contentWindow && ifr.contentWindow.fetch) {
+        return ifr.contentWindow.fetch.bind(ifr.contentWindow);
+      }
+    } catch (e) { /* fall through to XHR */ }
+    return function xhrFetch(url, opts) {
+      opts = opts || {};
+      return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open(opts.method || 'GET', url, true);
+        const headers = opts.headers || {};
+        Object.keys(headers).forEach((k) => { try { xhr.setRequestHeader(k, headers[k]); } catch (e) { /* skip */ } });
+        xhr.withCredentials = false;
+        xhr.onload = () => resolve({
+          ok: xhr.status >= 200 && xhr.status < 300,
+          status: xhr.status,
+          text: () => Promise.resolve(xhr.responseText),
+          json: () => Promise.resolve(JSON.parse(xhr.responseText))
+        });
+        xhr.onerror = () => reject(new TypeError('Failed to fetch'));
+        xhr.send(opts.body || null);
+      });
+    };
+  })();
+
   async function callOpenAI(userText, systemText, imageDataUrls) {
     const key = getOpenAiKey();
     if (!key) throw new Error('No OpenAI API key provided.');
@@ -1953,7 +1988,7 @@
     if (systemText) messages.push({ role: 'system', content: systemText });
     messages.push({ role: 'user', content });
 
-    const res = await fetch(`${OPENAI_PROXY || 'https://api.openai.com'}/v1/chat/completions`, {
+    const res = await rawFetch(`${OPENAI_PROXY || 'https://api.openai.com'}/v1/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -2668,7 +2703,7 @@
     const key = getYoutubeApiKey();
     if (!key) throw new Error('No YouTube API key provided.');
     const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&videoCategoryId=10&maxResults=1&q=${encodeURIComponent(query)}&key=${key}`;
-    const res = await fetch(url);
+    const res = await rawFetch(url);
     if (!res.ok) {
       const errText = await res.text().catch(() => '');
       throw new Error(`YouTube API error (${res.status}): ${errText.slice(0, 300)}`);
@@ -3387,7 +3422,7 @@
       for (const u of urls) {
         out.textContent = `🔎 Reading ${srcs.length + 1}/${urls.length}: ${u.slice(0, 60)}…`;
         try {
-          const r = await fetch(`${OPENAI_PROXY}/read?url=${encodeURIComponent(u)}`);
+          const r = await rawFetch(`${OPENAI_PROXY}/read?url=${encodeURIComponent(u)}`);
           if (!r.ok) continue;
           const html = await r.text();
           const doc = new DOMParser().parseFromString(html, 'text/html');
