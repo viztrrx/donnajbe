@@ -13,12 +13,25 @@
 //                        is not allowed to fetch (CORS). HTML/text only.
 
 export default {
-  async fetch(req) {
+  async fetch(req, env) {
     const cors = {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-GPA-Key',
+      'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-GPA-Key, X-GPA-User',
       'Access-Control-Max-Age': '86400'
+    };
+    const json = (obj, status) => new Response(JSON.stringify(obj), {
+      status: status || 200,
+      headers: { ...cors, 'Content-Type': 'application/json' }
+    });
+
+    // Moderation state for one user: active (default), blocked, or locked,
+    // plus a kick counter the client compares against to force a one-time
+    // sign-out. Read wherever we need to enforce or report it.
+    const getMod = async (kv, user) => {
+      if (!kv || !user) return { state: 'active', reason: '', kickNonce: 0 };
+      const m = await kv.get('mod:' + String(user).toLowerCase(), 'json');
+      return m || { state: 'active', reason: '', kickNonce: 0 };
     };
 
     if (req.method === 'OPTIONS') {
@@ -26,6 +39,146 @@ export default {
     }
 
     const url = new URL(req.url);
+
+    // ==== Usage telemetry (Cloudflare KV) ================================
+    //
+    // Backed by a KV namespace you bind as `TELEMETRY` in the Cloudflare
+    // dashboard, and an admin secret you set as the `ADMIN_TOKEN` variable.
+    // Neither the KV nor the token is ever exposed to the browser: users can
+    // only WRITE their own heartbeat (/track), and only a request bearing the
+    // ADMIN_TOKEN can READ the logs (/admin/*). That is real, server-side
+    // access control — unlike a key placed in the public script, which anyone
+    // could read. Presence ("active now") is a per-session KV key with a short
+    // TTL, so a user drops off the live list on their own ~2.5 min after their
+    // last heartbeat, with no cleanup job.
+    const SESSION_TTL = 150;        // seconds a session counts as "active"
+
+    if (url.pathname === '/track' && req.method === 'POST') {
+      const kv = env && env.TELEMETRY;
+      if (!kv) return json({ ok: false, error: 'telemetry KV not bound' }, 200);
+      // text/plain body so the browser sends no CORS preflight.
+      let body = {};
+      try { body = JSON.parse(await req.text()); } catch (e) { /* tolerate */ }
+      const clip = (v, n) => String(v == null ? '' : v).slice(0, n);
+      const user = clip(body.user || 'anonymous', 80);
+      const sid = clip(body.sid, 60) || crypto.randomUUID();
+      const now = Date.now();
+      const cf = req.cf || {};
+      const rec = {
+        user,
+        host: clip(body.host, 120),
+        url: clip(body.url, 300),
+        country: cf.country || '??',
+        region: clip(cf.region || cf.city || '', 60),
+        lastSeen: now
+      };
+      try {
+        // Presence: expires on its own -> "active now" needs no cleanup.
+        await kv.put('session:' + sid, JSON.stringify(rec), { expirationTtl: SESSION_TTL });
+        // All-time rollup, refreshed on the "open" event (not every beat) to
+        // stay well inside KV's free-tier write budget.
+        if (body.event === 'open') {
+          const uKey = 'user:' + user.toLowerCase();
+          const prev = await kv.get(uKey, 'json');
+          await kv.put(uKey, JSON.stringify({
+            user,
+            host: rec.host,
+            country: rec.country,
+            region: rec.region,
+            firstSeen: (prev && prev.firstSeen) || now,
+            lastSeen: now,
+            opens: ((prev && prev.opens) || 0) + 1
+          }));
+        }
+      } catch (e) { return json({ ok: false }, 200); }
+      // Hand the caller its own moderation state back on every beat, so a
+      // block/lock/kick reaches them within one heartbeat even without the
+      // separate /status poll.
+      const mod = await getMod(kv, user);
+      return json({ ok: true, state: mod.state || 'active', reason: mod.reason || '', kickNonce: mod.kickNonce || 0 });
+    }
+
+    // Read-only status for one user — the client polls this so a block takes
+    // effect fast without waiting for the next (write-costing) heartbeat.
+    if (url.pathname === '/status' && req.method === 'GET') {
+      const kv = env && env.TELEMETRY;
+      const mod = await getMod(kv, url.searchParams.get('user') || '');
+      return json({ state: mod.state || 'active', reason: mod.reason || '', kickNonce: mod.kickNonce || 0 });
+    }
+
+    // Owner sets a user's moderation state. Token-gated like the other admin
+    // routes, so only the owner can call it.
+    if (url.pathname === '/admin/moderate' && req.method === 'POST') {
+      const kv = env && env.TELEMETRY;
+      const ADMIN = (env && env.ADMIN_TOKEN) || '';
+      if (!kv) return json({ error: 'telemetry KV not bound' }, 500);
+      if (!ADMIN || (url.searchParams.get('token') || '') !== ADMIN) return json({ error: 'unauthorized' }, 401);
+      let body = {};
+      try { body = JSON.parse(await req.text()); } catch (e) { /* tolerate */ }
+      const user = String(body.user || '').toLowerCase().slice(0, 80);
+      if (!user) return json({ error: 'no user' }, 400);
+      const key = 'mod:' + user;
+      const cur = (await kv.get(key, 'json')) || { state: 'active', reason: '', kickNonce: 0 };
+      const action = body.action;
+      if (action === 'block') cur.state = 'blocked';
+      else if (action === 'lock') cur.state = 'locked';
+      else if (action === 'unblock' || action === 'unlock' || action === 'reset') cur.state = 'active';
+      else if (action === 'kick') cur.kickNonce = (cur.kickNonce || 0) + 1;
+      else return json({ error: 'unknown action' }, 400);
+      cur.reason = String(body.reason || '').slice(0, 300);
+      cur.updatedAt = Date.now();
+      await kv.put(key, JSON.stringify(cur));
+      return json({ ok: true, user, mod: cur });
+    }
+
+    if (url.pathname === '/admin/summary' && req.method === 'GET') {
+      const kv = env && env.TELEMETRY;
+      const ADMIN = (env && env.ADMIN_TOKEN) || '';
+      if (!kv) return json({ error: 'telemetry KV not bound on the worker' }, 500);
+      if (!ADMIN) return json({ error: 'ADMIN_TOKEN not set on the worker' }, 500);
+      if ((url.searchParams.get('token') || '') !== ADMIN) return json({ error: 'unauthorized' }, 401);
+
+      const active = [];
+      const sess = await kv.list({ prefix: 'session:' });
+      for (const k of sess.keys) { const v = await kv.get(k.name, 'json'); if (v) active.push(v); }
+      const users = [];
+      const ul = await kv.list({ prefix: 'user:' });
+      for (const k of ul.keys) { const v = await kv.get(k.name, 'json'); if (v) users.push(v); }
+
+      // Moderation states, so the admin sees who's blocked/locked at a glance.
+      const mods = {};
+      const ml = await kv.list({ prefix: 'mod:' });
+      for (const k of ml.keys) { const v = await kv.get(k.name, 'json'); if (v) mods[k.name.slice(4)] = v; }
+      const stateOf = (u) => (mods[String(u).toLowerCase()] || {}).state || 'active';
+      const reasonOf = (u) => (mods[String(u).toLowerCase()] || {}).reason || '';
+
+      // Collapse multiple live sessions from one user into a single presence.
+      const activeByUser = {};
+      active.forEach((s) => {
+        const u = activeByUser[s.user];
+        if (!u || s.lastSeen > u.lastSeen) activeByUser[s.user] = s;
+      });
+      const stamp = (arr) => arr.map((x) => ({ ...x, state: stateOf(x.user), reason: reasonOf(x.user) }));
+      return json({
+        now: Date.now(),
+        activeCount: Object.keys(activeByUser).length,
+        active: stamp(Object.values(activeByUser).sort((a, b) => b.lastSeen - a.lastSeen)),
+        users: stamp(users.sort((a, b) => b.lastSeen - a.lastSeen))
+      });
+    }
+
+    if (url.pathname === '/admin/clear' && req.method === 'POST') {
+      const kv = env && env.TELEMETRY;
+      const ADMIN = (env && env.ADMIN_TOKEN) || '';
+      if (!kv) return json({ error: 'telemetry KV not bound' }, 500);
+      if (!ADMIN || (url.searchParams.get('token') || '') !== ADMIN) return json({ error: 'unauthorized' }, 401);
+      let deleted = 0;
+      for (const prefix of ['session:', 'user:']) {
+        const list = await kv.list({ prefix });
+        for (const k of list.keys) { await kv.delete(k.name); deleted++; }
+      }
+      return json({ ok: true, deleted });
+    }
 
     // ---- /read?url=… : server-side page fetch for research mode ----
     if (url.pathname === '/read') {
@@ -64,6 +217,19 @@ export default {
     }
 
     // ---- /v1/* : forward to OpenAI ----
+    // Server-side moderation tooth: a blocked user is refused here, so blocking
+    // actually costs them the AI features rather than only hiding the panel.
+    // The client sends its signed-in name as X-GPA-User. (This can't gate
+    // Gemini, which the browser calls directly, or a user who supplies their
+    // own key in direct mode — those bypass the worker entirely.)
+    const modUser = req.headers.get('X-GPA-User');
+    if (modUser && env && env.TELEMETRY) {
+      const m = await getMod(env.TELEMETRY, modUser);
+      if (m.state === 'blocked') {
+        return json({ error: { message: 'Access to this tool has been blocked by the owner.' + (m.reason ? ' ' + m.reason : ''), type: 'blocked_by_owner' } }, 403);
+      }
+    }
+
     // The key can arrive four ways, tried in this order:
     //   1. a normal Authorization header
     //   2. the X-GPA-Key header    — for pages that rewrite Authorization
