@@ -2088,12 +2088,14 @@
       const headers = opts.headers || {};
       Object.keys(headers).forEach((k) => { try { xhr.setRequestHeader(k, headers[k]); } catch (e) { /* skip */ } });
       xhr.withCredentials = false;
-      xhr.onload = () => resolve({
+      const makeResponse = () => ({
         ok: xhr.status >= 200 && xhr.status < 300,
         status: xhr.status,
         text: () => Promise.resolve(xhr.responseText),
-        json: () => Promise.resolve(JSON.parse(xhr.responseText))
+        json: () => Promise.resolve(JSON.parse(xhr.responseText)),
+        clone: () => makeResponse()
       });
+      xhr.onload = () => resolve(makeResponse());
       xhr.onerror = () => reject(new TypeError('Failed to fetch'));
       xhr.send(opts.body || null);
     });
@@ -2123,6 +2125,19 @@
     for (const transport of chain) {
       try {
         const res = await transport.fn(url, opts);
+        // Some anti-bot wrappers don't throw — they "work" but silently drop
+        // the Authorization header. That shows up as OpenAI's 401 "You
+        // didn't provide an API key". Treat that transport as broken too
+        // and move on to the next one. (A genuinely wrong key returns a
+        // different message — "Incorrect API key" — and is passed through.)
+        if (res.status === 401) {
+          const bodyText = await res.clone().text().catch(() => '');
+          if (/didn'?t provide an API key|No API key provided|api key was not provided/i.test(bodyText)) {
+            console.warn('[Agent Console] fetch transport "' + transport.name + '" strips the Authorization header — skipping it');
+            lastErr = new Error('OpenAI API error (401): ' + bodyText.slice(0, 300));
+            continue;
+          }
+        }
         rawFetchCache = transport;
         if (transport.name !== 'iframe') {
           console.info('[Agent Console] page fetch unavailable — using ' + transport.name + ' transport instead');
@@ -2151,12 +2166,19 @@
     if (systemText) messages.push({ role: 'system', content: systemText });
     messages.push({ role: 'user', content });
 
+    const headers = {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${key}`
+    };
+    // Backup channel: some pages' wrappers strip the Authorization header in
+    // transit. A custom header survives that, and our worker converts it back
+    // to Authorization server-side. Only sent through our own proxy —
+    // api.openai.com wouldn't accept it in direct mode.
+    if (OPENAI_PROXY) headers['X-GPA-Key'] = key;
+
     const res = await rawFetch(`${OPENAI_PROXY || 'https://api.openai.com'}/v1/chat/completions`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${key}`
-      },
+      headers,
       body: JSON.stringify({ model: OPENAI_MODEL, messages })
     });
     if (!res.ok) {

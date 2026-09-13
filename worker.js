@@ -17,7 +17,7 @@ export default {
     const cors = {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+      'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-GPA-Key',
       'Access-Control-Max-Age': '86400'
     };
 
@@ -64,10 +64,14 @@ export default {
     }
 
     // ---- /v1/* : forward to OpenAI ----
+    // Authorization first, but if the browser's wrapper stripped it, fall
+    // back to the X-GPA-Key backup header the panel sends.
+    const authHeader = req.headers.get('Authorization')
+      || (req.headers.get('X-GPA-Key') ? `Bearer ${req.headers.get('X-GPA-Key')}` : null);
     const res = await fetch('https://api.openai.com' + url.pathname, {
       method: req.method,
       headers: {
-        'Authorization': req.headers.get('Authorization'),
+        'Authorization': authHeader,
         'Content-Type': 'application/json'
       },
       body: req.method !== 'GET' ? req.body : undefined
