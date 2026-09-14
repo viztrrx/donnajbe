@@ -377,11 +377,13 @@
         </div>
         <div id="gpa-sc-wrap" class="gpa-sc-wrap"></div>
 
-        <div class="gpa-sub" style="margin:14px 0 6px;">📁 Music library — preloaded from GitHub, plus any files you add here</div>
-        <div class="gpa-row">
+        <div class="gpa-sub" style="margin:14px 0 6px;">📁 Music library — files you add are saved on this device and play with no internet</div>
+        <div class="gpa-row" style="flex-wrap:wrap;">
           <button id="gpa-local-add-btn" class="gpa-btn">Add audio files</button>
+          <button id="gpa-local-clear-btn" class="gpa-btn">🗑 Clear saved</button>
           <input type="file" id="gpa-local-file-input" accept="audio/*" multiple style="display:none" />
         </div>
+        <div id="gpa-local-status" class="gpa-sub" style="margin:6px 0 0;"></div>
         <div id="gpa-local-playlist" class="gpa-local-playlist"></div>
         <div id="gpa-local-player" class="gpa-local-player" style="display:none;">
           <div id="gpa-local-nowplaying" class="gpa-sub"></div>
@@ -1190,6 +1192,9 @@
       .gpa-local-track:hover { border-color: ${t.accent}; }
       .gpa-local-track.playing { border-color: ${t.accent}; background: ${t.accent}18; color: ${t.accent}; }
       .gpa-local-track-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .gpa-local-track-badge { flex-shrink: 0; margin-right: 5px; opacity: 0.75; font-size: 10px; }
+      .gpa-local-track.gpa-track-unavailable { opacity: 0.45; cursor: not-allowed; }
+      .gpa-local-track.gpa-track-unavailable:hover { border-color: ${t.border}; }
       .gpa-local-track-remove { flex-shrink: 0; opacity: 0.6; cursor: pointer; padding: 0 4px; }
       .gpa-local-track-remove:hover { opacity: 1; color: #e5453a; }
       .gpa-local-player { margin-top: 10px; padding-top: 8px; border-top: 1px solid ${t.border}; }
@@ -4218,6 +4223,81 @@
   // loaded, playback needs no internet connection at all. The playlist is
   // for this browsing session only — it can't be saved to disk from here,
   // so it resets if you reload the page or reopen the panel later.
+  // ---- Offline music storage (IndexedDB) ------------------------------------
+  // Audio files you add are stored as Blobs in IndexedDB, so the library
+  // survives reloads and re-injections and plays with the network completely
+  // off — nothing is fetched, the bytes are already on the device.
+  //
+  // IndexedDB rather than localStorage because localStorage only holds strings
+  // and caps around 5MB; one song would blow it. Like every other browser
+  // store this is per-origin, so a library saved on one site isn't visible on
+  // another, and it is not part of profile sync (syncing tens of MB of audio
+  // through a JSON bin would be absurd) — it stays on this device.
+  const MUSIC_DB = 'gpa_music';
+  const MUSIC_STORE = 'tracks';
+  let musicDbPromise = null;
+
+  function idbOpen() {
+    if (musicDbPromise) return musicDbPromise;
+    musicDbPromise = new Promise((resolve, reject) => {
+      if (!window.indexedDB) { reject(new Error('IndexedDB unavailable')); return; }
+      const req = indexedDB.open(MUSIC_DB, 1);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains(MUSIC_STORE)) {
+          db.createObjectStore(MUSIC_STORE, { keyPath: 'id', autoIncrement: true });
+        }
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error || new Error('IndexedDB blocked'));
+    }).catch((e) => { musicDbPromise = null; throw e; });
+    return musicDbPromise;
+  }
+
+  function idbTx(mode, fn) {
+    return idbOpen().then((db) => new Promise((resolve, reject) => {
+      const tx = db.transaction(MUSIC_STORE, mode);
+      const store = tx.objectStore(MUSIC_STORE);
+      let out;
+      try { out = fn(store); } catch (e) { reject(e); return; }
+      tx.oncomplete = () => resolve(out && out.result !== undefined ? out.result : out);
+      tx.onerror = () => reject(tx.error || new Error('IndexedDB transaction failed'));
+      tx.onabort = () => reject(tx.error || new Error('IndexedDB transaction aborted'));
+    }));
+  }
+
+  function idbAddTrack(file) {
+    return idbTx('readwrite', (store) => store.add({
+      name: file.name, type: file.type || 'audio/mpeg', size: file.size, addedAt: Date.now(), blob: file
+    }));
+  }
+  function idbAllTracks() {
+    return idbTx('readonly', (store) => store.getAll());
+  }
+  function idbDeleteTrack(id) {
+    return idbTx('readwrite', (store) => store.delete(id));
+  }
+  function idbClearTracks() {
+    return idbTx('readwrite', (store) => store.clear());
+  }
+
+  // Ask the browser to keep this data rather than evicting it under pressure.
+  // Granted silently in many cases; a refusal is harmless, just less durable.
+  function requestPersistentStorage() {
+    try {
+      if (navigator.storage && navigator.storage.persist && navigator.storage.persisted) {
+        navigator.storage.persisted().then((already) => { if (!already) navigator.storage.persist().catch(() => {}); }).catch(() => {});
+      }
+    } catch (e) { /* not supported — fine */ }
+  }
+
+  function formatBytes(n) {
+    if (!n || n < 1024) return (n || 0) + ' B';
+    if (n < 1024 * 1024) return (n / 1024).toFixed(0) + ' KB';
+    if (n < 1024 * 1024 * 1024) return (n / (1024 * 1024)).toFixed(1) + ' MB';
+    return (n / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+  }
+
   const localAddBtn = panel.querySelector('#gpa-local-add-btn');
   const localFileInput = panel.querySelector('#gpa-local-file-input');
   const localPlaylistEl = panel.querySelector('#gpa-local-playlist');
@@ -4230,11 +4310,68 @@
   const localNextBtn = panel.querySelector('#gpa-local-next');
   const localVolume = panel.querySelector('#gpa-local-volume');
 
-  let localPlaylist = PRELOADED_TRACKS.map((t) => ({ name: t.name, url: t.url }));
+  const localStatusEl = panel.querySelector('#gpa-local-status');
+  const localClearBtn = panel.querySelector('#gpa-local-clear-btn');
+
+  // Remote tracks need the network; saved ones don't. `offline: true` marks a
+  // track as playable with no connection.
+  let localPlaylist = PRELOADED_TRACKS.map((t) => ({ name: t.name, url: t.url, offline: false }));
   let localCurrentIndex = -1;
+  let savedBytes = 0;
   const localAudio = new Audio();
   localAudio.volume = 0.8;
   renderLocalPlaylist(); // show the preloaded list immediately; nothing auto-plays (browsers block that without a click anyway)
+
+  // Pull the saved library out of IndexedDB and make it playable. Each blob
+  // becomes an object URL, so playback never touches the network.
+  async function loadSavedTracks() {
+    try {
+      const rows = await idbAllTracks();
+      (rows || []).sort((a, b) => a.addedAt - b.addedAt).forEach((row) => {
+        if (!row || !row.blob) return;
+        savedBytes += row.size || 0;
+        localPlaylist.push({ id: row.id, name: row.name, url: URL.createObjectURL(row.blob), offline: true });
+      });
+      renderLocalPlaylist();
+      refreshLocalStatus();
+      if (rows && rows.length) requestPersistentStorage();
+    } catch (e) {
+      refreshLocalStatus('Saved library unavailable in this browser (' + ((e && e.message) || e) + ') — added files will play for this session only.');
+    }
+  }
+  loadSavedTracks();
+
+  function isOffline() { return navigator.onLine === false; }
+
+  function refreshLocalStatus(msg) {
+    if (!localStatusEl) return;
+    if (msg) { localStatusEl.textContent = msg; return; }
+    const savedCount = localPlaylist.filter((t) => t.offline).length;
+    const parts = [];
+    parts.push(isOffline() ? '📴 Offline — saved songs still play' : '🌐 Online');
+    parts.push(`${savedCount} saved${savedBytes ? ' · ' + formatBytes(savedBytes) : ''}`);
+    localStatusEl.textContent = parts.join(' · ');
+  }
+
+  // Online/offline changes: restyle the playlist and gate the streaming paths.
+  function applyConnectivity() {
+    refreshLocalStatus();
+    renderLocalPlaylist();
+    const off = isOffline();
+    const musicSearchBtn = panel.querySelector('#gpa-music-search');
+    const scLoadBtn = panel.querySelector('#gpa-sc-load');
+    [musicSearchBtn, scLoadBtn].forEach((b) => {
+      if (!b) return;
+      b.disabled = off;
+      b.title = off ? 'Needs an internet connection' : '';
+      b.style.opacity = off ? '0.5' : '';
+    });
+    const musicStatus = panel.querySelector('#gpa-music-status');
+    if (musicStatus && off) musicStatus.textContent = 'Offline — YouTube search and SoundCloud need a connection. Your saved library below still works.';
+  }
+  window.addEventListener('online', applyConnectivity);
+  window.addEventListener('offline', applyConnectivity);
+  applyConnectivity();
 
   function formatTime(sec) {
     if (!isFinite(sec) || sec < 0) sec = 0;
@@ -4245,37 +4382,57 @@
 
   function renderLocalPlaylist() {
     localPlaylistEl.innerHTML = '';
+    const off = isOffline();
     localPlaylist.forEach((track, i) => {
       const row = document.createElement('div');
-      row.className = 'gpa-local-track' + (i === localCurrentIndex ? ' playing' : '');
+      const unavailable = off && !track.offline;   // remote track, no connection
+      row.className = 'gpa-local-track' + (i === localCurrentIndex ? ' playing' : '') + (unavailable ? ' gpa-track-unavailable' : '');
+      const badge = document.createElement('span');
+      badge.className = 'gpa-local-track-badge';
+      badge.textContent = track.offline ? '💾' : '☁';
+      badge.title = track.offline ? 'Saved on this device — plays offline' : 'Streamed from the web — needs a connection';
       const name = document.createElement('span');
       name.className = 'gpa-local-track-name';
       name.textContent = track.name;
       const remove = document.createElement('span');
       remove.className = 'gpa-local-track-remove';
       remove.textContent = '✕';
-      remove.title = 'Remove';
+      remove.title = track.offline ? 'Delete from this device' : 'Remove from the list';
       remove.addEventListener('click', (e) => { e.stopPropagation(); removeLocalTrack(i); });
+      row.appendChild(badge);
       row.appendChild(name);
       row.appendChild(remove);
-      row.addEventListener('click', () => playLocalTrack(i));
+      row.title = unavailable ? 'Needs an internet connection' : '';
+      row.addEventListener('click', () => {
+        if (unavailable) { refreshLocalStatus('That track streams from the web and needs a connection.'); return; }
+        playLocalTrack(i);
+      });
       localPlaylistEl.appendChild(row);
     });
   }
 
   function playLocalTrack(i) {
     if (i < 0 || i >= localPlaylist.length) return;
+    if (isOffline() && !localPlaylist[i].offline) return;   // can't stream right now
     localCurrentIndex = i;
     localAudio.src = localPlaylist[i].url;
-    localAudio.play();
+    localAudio.play().catch(() => { /* autoplay/decoding refusal — the UI still reflects the selection */ });
     localPlayerEl.style.display = 'block';
     localNowPlaying.textContent = localPlaylist[i].name;
     renderLocalPlaylist();
   }
 
   function removeLocalTrack(i) {
+    const track = localPlaylist[i];
+    if (!track) return;
+    if (track.offline && !confirm(`Delete "${track.name}" from this device?`)) return;
     const wasPlaying = i === localCurrentIndex;
-    URL.revokeObjectURL(localPlaylist[i].url);
+    // Only object URLs we created need revoking; remote https: urls don't.
+    if (String(track.url).startsWith('blob:')) URL.revokeObjectURL(track.url);
+    if (track.id !== undefined) {
+      savedBytes = Math.max(0, savedBytes - (track.size || 0));
+      idbDeleteTrack(track.id).catch(() => { /* already gone */ });
+    }
     localPlaylist.splice(i, 1);
     if (wasPlaying) {
       localAudio.pause();
@@ -4286,15 +4443,56 @@
       localCurrentIndex--;
     }
     renderLocalPlaylist();
+    refreshLocalStatus();
   }
 
   localAddBtn.addEventListener('click', () => localFileInput.click());
-  localFileInput.addEventListener('change', () => {
+  localFileInput.addEventListener('change', async () => {
     const files = Array.from(localFileInput.files || []);
-    files.forEach((file) => localPlaylist.push({ name: file.name, url: URL.createObjectURL(file) }));
     localFileInput.value = '';
+    if (!files.length) return;
+    requestPersistentStorage();
+    let savedCount = 0, sessionOnly = 0, lastError = '';
+    for (const file of files) {
+      const url = URL.createObjectURL(file);
+      try {
+        // Store the bytes so the track is still here next time, offline.
+        const id = await idbAddTrack(file);
+        savedBytes += file.size || 0;
+        savedCount++;
+        localPlaylist.push({ id, name: file.name, url, size: file.size, offline: true });
+      } catch (e) {
+        // Out of quota, private mode, or IndexedDB blocked: still playable now,
+        // just not remembered. Say so rather than pretending it was saved.
+        sessionOnly++;
+        lastError = (e && e.message) || String(e);
+        localPlaylist.push({ name: file.name, url, offline: true, session: true });
+      }
+    }
     renderLocalPlaylist();
-    if (localCurrentIndex === -1 && localPlaylist.length) playLocalTrack(0);
+    if (sessionOnly) {
+      refreshLocalStatus(`${savedCount} saved for offline · ${sessionOnly} could not be saved (${lastError}) — those play this session only.`);
+    } else {
+      refreshLocalStatus();
+    }
+    if (localCurrentIndex === -1 && localPlaylist.length) playLocalTrack(localPlaylist.length - files.length);
+  });
+
+  localClearBtn.addEventListener('click', async () => {
+    const saved = localPlaylist.filter((t) => t.id !== undefined);
+    if (!saved.length) { refreshLocalStatus('Nothing saved on this device yet.'); return; }
+    if (!confirm(`Delete all ${saved.length} saved song${saved.length === 1 ? '' : 's'} from this device?`)) return;
+    try { await idbClearTracks(); } catch (e) { /* report below */ }
+    localAudio.pause();
+    localAudio.removeAttribute('src');
+    localCurrentIndex = -1;
+    localPlayerEl.style.display = 'none';
+    // Only the saved ones go — session-only adds and remote tracks stay put.
+    localPlaylist.forEach((t) => { if (t.id !== undefined && String(t.url).startsWith('blob:')) URL.revokeObjectURL(t.url); });
+    localPlaylist = localPlaylist.filter((t) => t.id === undefined);
+    savedBytes = 0;
+    renderLocalPlaylist();
+    refreshLocalStatus();
   });
 
   localPlayPauseBtn.addEventListener('click', () => {
