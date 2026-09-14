@@ -1,4 +1,4 @@
-\/*!
+/*!
  * Gemini Page Assistant — injectable console/bookmarklet AI overlay
  * -------------------------------------------------------------
  * WHAT THIS DOES
