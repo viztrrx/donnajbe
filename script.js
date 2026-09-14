@@ -1,4 +1,4 @@
-/*!
+\/*!
  * Gemini Page Assistant — injectable console/bookmarklet AI overlay
  * -------------------------------------------------------------
  * WHAT THIS DOES
@@ -164,6 +164,37 @@
     return;
   }
 
+  // ---- Instance lifecycle ---------------------------------------------------
+  // The Reload button re-runs this whole file in place. That only works if the
+  // old copy leaves nothing behind: a second set of key handlers would
+  // double-fire, a second heartbeat would double-report, a second selection
+  // listener would pop two bubbles. So every global side effect this instance
+  // creates is registered here and undone by teardownInstance().
+  //
+  // Listeners go through onWin/onDoc, which attach an AbortSignal — one abort()
+  // removes all of them at once, including anonymous handlers that could never
+  // be removed individually. Intervals go through the shadowed setInterval
+  // below, so none can be missed.
+  const gpaAbort = new AbortController();
+  function withSig(opts) {
+    if (opts === true) return { capture: true, signal: gpaAbort.signal };
+    if (opts && typeof opts === 'object') return { ...opts, signal: gpaAbort.signal };
+    return { signal: gpaAbort.signal };
+  }
+  function onWin(type, fn, opts) { window.addEventListener(type, fn, withSig(opts)); }
+  function onDoc(type, fn, opts) { document.addEventListener(type, fn, withSig(opts)); }
+
+  // Deliberately shadows the globals for this whole file so every repeating
+  // timer is tracked without touching the call sites. Ids stay real, so
+  // clearInterval elsewhere keeps working.
+  const gpaIntervals = new Set();
+  const setInterval = function (fn, ms, ...rest) {
+    const id = window.setInterval(fn, ms, ...rest);
+    gpaIntervals.add(id);
+    return id;
+  };
+  const clearInterval = function (id) { gpaIntervals.delete(id); return window.clearInterval(id); };
+
   // ---- Themes ---------------------------------------------------------
   const THEMES = {
     dark:      { bg: '#0b0b0f', panel: '#16161c', field: '#1e1e26', text: '#eaeaf0', sub: '#9a9aa8', accent: '#5b8cff', border: '#26262f' },
@@ -249,6 +280,7 @@
       <button id="gpa-min" title="Minimize">&minus;</button>
       <span class="gpa-title">Agent Console</span>
       <span class="gpa-dot"></span>
+      <button id="gpa-reload" title="Reload the console — fetches the latest script and restarts it">&#10227;</button>
       <button id="gpa-close" title="Close">&times;</button>
     </div>
     <div class="gpa-login" id="gpa-login">
@@ -904,6 +936,20 @@
         transition: box-shadow 0.15s ease, background 0.15s ease;
       }
       #gpa-min:hover { background: ${t.accent}22; box-shadow: 0 0 10px ${t.accent}66; }
+      #gpa-reload {
+        width: 22px; height: 22px; border-radius: 50%;
+        border: 1px solid ${t.accent}70;
+        background: transparent;
+        color: ${t.accent};
+        font-size: 13px; line-height: 1; cursor: pointer;
+        display:flex; align-items:center; justify-content:center;
+        flex-shrink: 0;
+        transition: box-shadow 0.15s ease, background 0.15s ease;
+      }
+      #gpa-reload:hover { background: ${t.accent}22; box-shadow: 0 0 10px ${t.accent}66; }
+      #gpa-reload:disabled { opacity: 0.5; cursor: default; }
+      #gpa-reload.spinning { animation: gpa-spin 0.8s linear infinite; }
+      @keyframes gpa-spin { to { transform: rotate(360deg); } }
       .gpa-title {
         font-size: 10.5px; font-weight: 700; letter-spacing: 1.4px; flex: 1;
         text-transform: uppercase;
@@ -1690,10 +1736,10 @@
     root.addEventListener('touchstart', (e) => {
       if (e.target.closest('#gpa-drag') || e.target.closest('.gpa-mini') || (e.target.closest('.gpa-login-brand') && !e.target.closest('.gpa-login-logo') && !e.target.closest('.gpa-login-winbtns'))) start(e);
     }, { passive: false });
-    window.addEventListener('mousemove', move);
-    window.addEventListener('touchmove', move, { passive: false });
-    window.addEventListener('mouseup', end);
-    window.addEventListener('touchend', end);
+    onWin('mousemove', move);
+    onWin('touchmove', move, { passive: false });
+    onWin('mouseup', end);
+    onWin('touchend', end);
   })();
 
   // ---- Minimize / restore ---------------------------------------------
@@ -3006,10 +3052,10 @@
     };
     head.addEventListener('mousedown', down);
     head.addEventListener('touchstart', down, { passive: false });
-    window.addEventListener('mousemove', move, true);
-    window.addEventListener('touchmove', move, { passive: false, capture: true });
-    window.addEventListener('mouseup', up, true);
-    window.addEventListener('touchend', up, true);
+    onWin('mousemove', move, true);
+    onWin('touchmove', move, { passive: false, capture: true });
+    onWin('mouseup', up, true);
+    onWin('touchend', up, true);
     // move/up live on window, so they have to come off with the popup or every
     // popup shown this session keeps listening to every mouse move.
     tutorPopCleanup = () => {
@@ -3138,8 +3184,8 @@
     try {
       autoFollowObserver.observe(document.body, { childList: true, subtree: true, characterData: true });
     } catch (e) { /* nothing observable — scroll still drives it */ }
-    window.addEventListener('scroll', onAutoFollowScroll, true);
-    window.addEventListener('resize', onAutoFollowScroll);
+    onWin('scroll', onAutoFollowScroll, true);
+    onWin('resize', onAutoFollowScroll);
     scheduleAutoFollow(150);
   }
 
@@ -4369,8 +4415,8 @@
     const musicStatus = panel.querySelector('#gpa-music-status');
     if (musicStatus && off) musicStatus.textContent = 'Offline — YouTube search and SoundCloud need a connection. Your saved library below still works.';
   }
-  window.addEventListener('online', applyConnectivity);
-  window.addEventListener('offline', applyConnectivity);
+  onWin('online', applyConnectivity);
+  onWin('offline', applyConnectivity);
   applyConnectivity();
 
   function formatTime(sec) {
@@ -4694,7 +4740,7 @@
       pop.addEventListener('click', removePop);
     }
 
-    document.addEventListener('mouseup', (e) => {
+    onDoc('mouseup', (e) => {
       if (e.target.closest && (e.target.closest('#gpa-root-host') || e.target.closest('.gpa-sel-bubble') || e.target.closest('.gpa-sel-pop'))) return;
       setTimeout(() => {
         const sel = window.getSelection();
@@ -4730,8 +4776,8 @@
         bubble.style.top = Math.max(8, rect.top - bubble.offsetHeight - 6) + 'px';
       }, 10);
     });
-    window.addEventListener('scroll', removeBubble, true);
-    window.addEventListener('keydown', (e) => { if (e.key === 'Escape') { removeBubble(); removePop(); } });
+    onWin('scroll', removeBubble, true);
+    onWin('keydown', (e) => { if (e.key === 'Escape') { removeBubble(); removePop(); } });
   })();
 
   // Table extractor: list every table on the page with CSV copy + Ask AI.
@@ -5309,7 +5355,7 @@
     ADMIN_KEYS.MODEL, ADMIN_KEYS.SMART_MODEL, ADMIN_KEYS.AUTO_UPGRADE,
     ADMIN_KEYS.SYSPREFIX, ADMIN_KEYS.MAXCHARS, ADMIN_KEYS.TEMP,
     ADMIN_KEYS.LOGS, ADMIN_KEYS.TELE_TOKEN, ADMIN_KEYS.TELE_ENDPOINT,
-    ADMIN_KEYS.TELE_NOTICE_SEEN
+    ADMIN_KEYS.TELE_NOTICE_SEEN, 'gpa_script_src'
   ];
 
   const loginOverlay = panel.querySelector('#gpa-login');
@@ -5523,7 +5569,7 @@
   // Auto-save so progress survives a crash or a closed tab, not just a
   // clean sign-out.
   setInterval(saveProgress, 5000);
-  window.addEventListener('beforeunload', saveProgress);
+  onWin('beforeunload', saveProgress);
 
   // ---- Games tab -----------------------------------------------------------
   // Game loaders may return either a plain cleanup function (older/simple
@@ -5930,7 +5976,7 @@
       nextDir = nd;
     }
 
-    window.addEventListener('keydown', onKey);
+    onWin('keydown', onKey);
     reset();
     draw(0);
     raf = requestAnimationFrame(loop);
@@ -6075,7 +6121,7 @@
       if (map[e.key]) { e.preventDefault(); move(map[e.key]); }
     }
 
-    window.addEventListener('keydown', onKey);
+    onWin('keydown', onKey);
     reset();
 
     const hint = document.createElement('div');
@@ -7204,7 +7250,7 @@
       draw();
     }
 
-    window.addEventListener('keydown', onKey);
+    onWin('keydown', onKey);
     reset();
     scheduleTick();
 
@@ -7703,7 +7749,7 @@
   // T = show/hide the match timer. All share the same guards — ignored while
   // typing, ignored with modifier keys, and only while the Games tab is open.
   // They work in fullscreen too, since the listener is on window.
-  window.addEventListener('keydown', (e) => {
+  onWin('keydown', (e) => {
     const k = e.key.toLowerCase();
     if (k !== 'p' && k !== 'r' && k !== 't') return;
     if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -7737,9 +7783,9 @@
     // Entering/leaving fullscreen changes the available area — refit.
     requestAnimationFrame(fitGameToStage);
   }
-  window.addEventListener('resize', () => requestAnimationFrame(fitGameToStage));
-  document.addEventListener('fullscreenchange', syncFullscreenLabel);
-  document.addEventListener('webkitfullscreenchange', syncFullscreenLabel);
+  onWin('resize', () => requestAnimationFrame(fitGameToStage));
+  onDoc('fullscreenchange', syncFullscreenLabel);
+  onDoc('webkitfullscreenchange', syncFullscreenLabel);
 
   loadGame('ttt');
 
@@ -8584,6 +8630,69 @@
       renderLsEditor();
     });
   })();
+
+  // ---- Reload the console in place ------------------------------------------
+  // Fetches the latest copy of this script and restarts it, so you pick up a
+  // new version without re-running the bookmarklet.
+  const SCRIPT_SRC = 'https://raw.githubusercontent.com/viztrrx/donnajbe/main/script.js';
+  function scriptSource() { return (admGet('gpa_script_src') || '').trim() || SCRIPT_SRC; }
+
+  // Undo everything this instance did to the page. Anything missed here shows
+  // up as a duplicate after a reload, so the order matters: stop the machinery
+  // first, then release resources, then remove the UI.
+  function teardownInstance() {
+    try { gpaAbort.abort(); } catch (e) { /* listeners already gone */ }
+    gpaIntervals.forEach((id) => { try { window.clearInterval(id); } catch (e) { /* ignore */ } });
+    gpaIntervals.clear();
+    try { stopAutoFollow(); } catch (e) { /* not started */ }
+    try { closeTutorPopup(); } catch (e) { /* none open */ }
+    try { clearPageHighlights(); } catch (e) { /* none injected */ }
+    try { stopActiveGame(); } catch (e) { /* no game running */ }
+    try { if (window.speechSynthesis) speechSynthesis.cancel(); } catch (e) { /* ignore */ }
+    try {
+      localAudio.pause();
+      localAudio.removeAttribute('src');
+      localPlaylist.forEach((t) => { if (String(t.url).startsWith('blob:')) URL.revokeObjectURL(t.url); });
+    } catch (e) { /* player never initialised */ }
+    try { iframeKeepAlive.forEach((f) => f.remove()); iframeKeepAlive.length = 0; } catch (e) { /* ignore */ }
+    // Note: .gpa-page-highlight is handled by clearPageHighlights above, which
+    // unwraps the spans. Removing them outright here would delete page text.
+    document.querySelectorAll('.gpa-sel-bubble, .gpa-sel-pop, .gpa-tutor-pop').forEach((el) => {
+      try { el.remove(); } catch (e) { /* ignore */ }
+    });
+    try { host.remove(); } catch (e) { /* already gone */ }
+  }
+
+  async function reloadInterface(btn) {
+    const src = scriptSource();
+    const setBusy = (busy) => {
+      if (!btn) return;
+      btn.disabled = busy;
+      btn.classList.toggle('spinning', busy);
+    };
+    setBusy(true);
+    try {
+      // Fetch BEFORE tearing anything down: if the network or the URL is bad we
+      // must still be running afterwards, not left with no console at all.
+      const url = src + (src.includes('?') ? '&' : '?') + 'v=' + Date.now();
+      const res = await fetch(url, { cache: 'no-store' });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const code = await res.text();
+      // Cheap sanity check so a 404 page or a redirect can't be eval'd.
+      if (!/gpa-root-host/.test(code)) throw new Error('that URL did not return the console script');
+      try { saveProgress(); } catch (e) { /* not signed in */ }
+      teardownInstance();
+      // Indirect eval runs it in global scope, exactly like the bookmarklet.
+      (0, eval)(code);
+    } catch (e) {
+      setBusy(false);
+      alert('Reload failed: ' + ((e && e.message) || e)
+        + '\n\nThe version you have is still running.'
+        + (navigator.onLine === false ? '\n(You appear to be offline.)' : ''));
+    }
+  }
+
+  panel.querySelector('#gpa-reload').addEventListener('click', () => reloadInterface(panel.querySelector('#gpa-reload')));
 
   // ---- Session restore on load ----
   // If this browser already had someone signed in, skip straight back in.
