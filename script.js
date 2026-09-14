@@ -713,9 +713,22 @@
 
           <!-- Power tools -->
           <div class="gpa-admin-pane" data-apane="tools">
-            <div class="gpa-sub" style="margin:4px 0 4px;">Model override (both providers)</div>
+            <div class="gpa-sub" style="margin:4px 0 4px;">Base AI model</div>
+            <div class="gpa-row"><select id="gpa-adm-model-sel" class="gpa-input"></select></div>
+            <div class="gpa-row"><input id="gpa-adm-model" class="gpa-input" placeholder="Custom model id (e.g. gemini-2.5-flash)" autocomplete="off" style="display:none;" /></div>
+            <div class="gpa-sub" style="margin:12px 0 4px;">Smart model — used on hard tasks</div>
+            <div class="gpa-row"><select id="gpa-adm-smart-sel" class="gpa-input"></select></div>
+            <div class="gpa-row"><input id="gpa-adm-smart" class="gpa-input" placeholder="Custom model id" autocomplete="off" style="display:none;" /></div>
             <div class="gpa-row">
-              <input id="gpa-adm-model" class="gpa-input" placeholder="e.g. gpt-4o, gemini-2.0-flash — blank = default" autocomplete="off" />
+              <button id="gpa-adm-autoupgrade" class="gpa-btn" style="flex:1;">⚡ Auto-upgrade on hard tasks: OFF</button>
+            </div>
+            <div class="gpa-admin-note">
+              Hard tasks — quizzes, multi-part or math-heavy questions — automatically switch to the
+              Smart model when auto-upgrade is on, so tough questions get a better answer without
+              slowing down the easy ones. Suggestion: keep the base fast and cheap (gpt-4o-mini) and
+              set Smart to something stronger — gpt-4o, gpt-4.1, a gpt-5.x, or a reasoning model like
+              o4-mini for hard math. The override applies to whichever provider is selected in
+              Settings; the ids listed are OpenAI's (pick Custom… for a Gemini model).
             </div>
             <div class="gpa-sub" style="margin:12px 0 4px;">System-prompt prefix (prepended to every AI call)</div>
             <textarea id="gpa-adm-sysprefix" class="gpa-sync-box" style="height:70px;" placeholder="Extra standing instructions for the AI on every request…"></textarea>
@@ -2211,6 +2224,8 @@
   const ADMIN_PIN = '1029';
   const ADMIN_KEYS = {
     MODEL: 'gpa_admin_model',
+    SMART_MODEL: 'gpa_admin_smart_model',   // stronger model for hard tasks
+    AUTO_UPGRADE: 'gpa_admin_auto_upgrade', // 'on' -> use SMART_MODEL on hard tasks
     SYSPREFIX: 'gpa_admin_sysprefix',
     MAXCHARS: 'gpa_admin_maxchars',
     TEMP: 'gpa_admin_temp',
@@ -2220,7 +2235,28 @@
     TELE_NOTICE_SEEN: 'gpa_tele_notice_seen'
   };
   function admGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
-  function effectiveModel(dflt) { const m = (admGet(ADMIN_KEYS.MODEL) || '').trim(); return m || dflt; }
+  function autoUpgradeOn() { return admGet(ADMIN_KEYS.AUTO_UPGRADE) === 'on'; }
+  function smartModel() { return (admGet(ADMIN_KEYS.SMART_MODEL) || '').trim(); }
+  // The model for a request. On a task flagged `hard`, when auto-upgrade is on
+  // and a smart model is set, escalate to it; otherwise use the base override,
+  // else the provider default.
+  function effectiveModel(dflt, hard) {
+    if (hard && autoUpgradeOn() && smartModel()) return smartModel();
+    const m = (admGet(ADMIN_KEYS.MODEL) || '').trim();
+    return m || dflt;
+  }
+  // Cheap difficulty heuristic: long prompts, several numbered items, math or
+  // logic vocabulary, symbols, or LaTeX mark a question as "hard" and worth a
+  // stronger model. Deliberately generous — a false positive just spends a bit
+  // more on a better answer.
+  function isHardQuestion(text) {
+    const t = String(text || '');
+    if (t.length > 400) return true;
+    if (/(?:\b\d+\s*[).][^\n]*\n?){3,}/.test(t)) return true;   // 3+ numbered items
+    if (/[∫∑∏√≥≤≠∈∀∃πθλµ°]/.test(t)) return true;             // math symbols
+    if (/\$\$?[^$]+\$\$?|\\[a-zA-Z]+\{/.test(t)) return true;    // LaTeX
+    return /\b(prove|proof|derive|derivative|integral|integrate|matrix|eigen|theorem|asymptotic|complexity|big-?o|differential|logarith|factorial|permutation|combinator|probability|stoichiometr|equilibrium|vector|summation|quadratic|polynomial|calculus)\b/i.test(t);
+  }
   function effectiveMaxPageChars() { const n = parseInt(admGet(ADMIN_KEYS.MAXCHARS), 10); return (n && n >= 1000) ? n : MAX_PAGE_CHARS; }
   function effectiveTemp() { const v = parseFloat(admGet(ADMIN_KEYS.TEMP)); return isNaN(v) ? null : Math.max(0, Math.min(2, v)); }
   function adminSysPrefix() { const p = (admGet(ADMIN_KEYS.SYSPREFIX) || '').trim(); return p ? p + '\n\n' : ''; }
@@ -2235,7 +2271,7 @@
     return key || null;
   }
 
-  async function callGemini(userText, systemText, imageDataUrls) {
+  async function callGemini(userText, systemText, imageDataUrls, hard) {
     const key = getApiKey();
     if (!key) throw new Error('No API key provided.');
 
@@ -2252,7 +2288,7 @@
     const body = { contents: [{ role: 'user', parts }] };
     if (systemText) body.systemInstruction = { parts: [{ text: systemText }] };
 
-    const res = await rawFetch(`${API_BASE}${effectiveModel(MODEL)}:generateContent?key=${key}`, {
+    const res = await rawFetch(`${API_BASE}${effectiveModel(MODEL, hard)}:generateContent?key=${key}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
@@ -2427,7 +2463,7 @@
     throw lastErr || new TypeError('Failed to fetch');
   }
 
-  async function callOpenAI(userText, systemText, imageDataUrls) {
+  async function callOpenAI(userText, systemText, imageDataUrls, hard) {
     const key = getOpenAiKey();
     if (!key) throw new Error('No OpenAI API key provided.');
 
@@ -2473,7 +2509,7 @@
       ? `${OPENAI_PROXY}/v1/chat/completions`
       : 'https://api.openai.com/v1/chat/completions';
 
-    payload.model = effectiveModel(OPENAI_MODEL);
+    payload.model = effectiveModel(OPENAI_MODEL, hard);
     const temp = effectiveTemp();
     if (temp !== null) payload.temperature = temp;
 
@@ -2526,7 +2562,7 @@
   }
 
   // Dispatches to whichever provider is selected in the Theme tab.
-  async function callAI(userText, systemText, imageDataUrls) {
+  async function callAI(userText, systemText, imageDataUrls, hard) {
     if (aiBlocked) throw new Error('Access to this tool has been blocked by the owner.');
     const provider = localStorage.getItem(PROVIDER_KEY) || 'gemini';
     // Order matters: admin standing instructions, then saved context, then the
@@ -2534,8 +2570,8 @@
     // on have to be the final word, or the model narrates instead of obeying.
     const sys = adminSysPrefix() + buildContextMemory() + (systemText || '');
     return provider === 'openai'
-      ? callOpenAI(userText, sys, imageDataUrls)
-      : callGemini(userText, sys, imageDataUrls);
+      ? callOpenAI(userText, sys, imageDataUrls, hard)
+      : callGemini(userText, sys, imageDataUrls, hard);
   }
 
   // Real second-pass check for quiz/answer-grid results: sends the draft
@@ -2548,7 +2584,7 @@
     const sys = 'You previously drafted answers to a set of questions. Re-check EACH answer against the original context on its own, independently — do not just assume the draft is correct. Fix anything wrong, then return a final JSON array in this exact shape and nothing else: [{"q":"1","a":"B","c":92}] — "c" is your honest confidence (0-100) that this specific final answer is correct. Do not include any text outside the JSON array.';
     const userText = `ORIGINAL CONTEXT:\n${contextText}\n\nDRAFT ANSWERS TO VERIFY:\n${JSON.stringify(draftGrid)}`;
     try {
-      const out = await callAI(userText, sys, imageDataUrls);
+      const out = await callAI(userText, sys, imageDataUrls, true);
       const verified = tryParseAnswerGrid(out);
       return verified || draftGrid;
     } catch (e) {
@@ -3869,7 +3905,7 @@
     scanOutput.textContent = 'Reading the page…';
     try {
       const sys = 'You are analyzing a quiz, exam, or worksheet on this web page, including any dropdown menus and multiple-choice/checkbox options listed under FORM CONTROLS ON THIS PAGE. Identify every question — including multi-part questions like "2a"/"2b" — and give the single best correct answer for each, using the dropdown/multiple-choice options where relevant. Respond with ONLY a JSON array in this exact shape and nothing else: [{"q":"1","a":"B","c":85,"h":"exact verbatim phrase from PAGE TEXT for this question"}] — "q" is the question number/label as a string (use sub-labels for multi-part questions), "a" is the short correct answer, "c" is your confidence (0-100), "h" is a short exact quote (copied verbatim from PAGE TEXT, not paraphrased) that pinpoints where that question appears — so it can be found and highlighted on the page. If you genuinely cannot determine an answer for an item, use "a":"Unclear" and a low "c". Do not include any text outside the JSON array.';
-      const out = await callAI(combinedText, sys, screenshotDataUrl ? [screenshotDataUrl] : null);
+      const out = await callAI(combinedText, sys, screenshotDataUrl ? [screenshotDataUrl] : null, true);
       const grid = tryParseAnswerGrid(out);
       if (grid) {
         quizBtn.textContent = 'Double-checking…';
@@ -3878,6 +3914,7 @@
           grid
         );
         renderAnswerGrid(scanOutput, verified);
+        maybeSuggestBetterModel(scanOutput);
         highlightSnippetsOnPage(verified.map((it) => it.h).filter(Boolean));
       } else {
         typeText(scanOutput, out, scanOutput);
@@ -3924,10 +3961,11 @@
         'Respond with ONLY a JSON array and nothing else, in exactly this shape: [{"q":"7","a":"B","c":90,"concept":"...","why":"...","sol":"... ; ... ; ...","pitfall":"...","cite":[{"label":"...","url":"..."}],"h":"..."}].',
         'If you genuinely cannot determine an answer, use "a":"Unclear", a low "c", and say what is missing in "why". Do not include any text outside the JSON array.'
       ].join(' ');
-      const out = await callAI(combinedText, sys, screenshotDataUrl ? [screenshotDataUrl] : null);
+      const out = await callAI(combinedText, sys, screenshotDataUrl ? [screenshotDataUrl] : null, true);
       const grid = tryParseAnswerGrid(out);
       if (grid) {
         renderTutorGrid(scanOutput, grid);
+        maybeSuggestBetterModel(scanOutput);
         highlightSnippetsOnPage(grid.map((it) => it.h).filter(Boolean));
         startAutoFollow(grid);
         const hint = document.createElement('div');
@@ -4071,11 +4109,13 @@
       const sys = 'You are the AI inside the user\'s "Agent Console" panel, answering about the web page they are viewing. ' + CAPABILITIES_BRIEF + ' Answer the question using ONLY the provided context (page text and/or screenshot). Before finalizing, double-check your answer against the context. If — and only if — the question is asking for answers to multiple numbered items (like a quiz, worksheet, or multiple-choice list), respond with ONLY a JSON array and nothing else, in exactly this shape: [{"q":"1","a":"B","c":90,"h":"exact verbatim phrase from PAGE TEXT near this question"}] — "q" is the item number/label as a string, "a" is the short answer, "c" is your confidence (0-100), "h" is a short exact quote (copied verbatim from PAGE TEXT, not paraphrased) that pinpoints where that question/answer appears, one object per item, no extra commentary. For any other kind of question, answer in brief plain sentences with no markdown formatting (no asterisks, headers, or lists), then two more lines: first exactly "CONFIDENCE: NN" (0-100, your confidence the answer is correct), then exactly "HIGHLIGHT: " followed by a short exact verbatim quote from PAGE TEXT that contains or supports the answer (empty if none applies). If the answer is not in the content, say so in one short sentence and use a low confidence number.';
       const textPart = `${pageText ? `PAGE TEXT:\n${pageText}\n\n` : ''}QUESTION:\n${q}`;
       const images = screenshotDataUrl ? [screenshotDataUrl] : null;
-      const out = await callAI(textPart, sys, images);
+      const hard = isHardQuestion(q) || !!screenshotDataUrl;
+      const out = await callAI(textPart, sys, images, hard);
       const grid = tryParseAnswerGrid(out);
       if (grid) {
         const verified = mergeHighlightField(await verifyGridAnswers(textPart, grid, images), grid);
         renderAnswerGrid(scanOutput, verified);
+        if (hard) maybeSuggestBetterModel(scanOutput);
         highlightSnippetsOnPage(verified.map((it) => it.h).filter(Boolean));
       } else {
         const { text: t1, value: highlightSnippet } = extractTrailingLine(out, 'HIGHLIGHT');
@@ -4308,9 +4348,9 @@
     chatEl.scrollTop = chatEl.scrollHeight;
     try {
       const sys = 'You are a helpful, concise assistant. ' + CAPABILITIES_BRIEF + ' Reply in plain conversational sentences only — no markdown formatting (no asterisks, headers, or lists) since this is shown as plain text. Keep answers as short as possible while still being useful. Then, on its own final line, write exactly "CONFIDENCE: NN" where NN (0-100) is your confidence that the answer is accurate.';
-      const out = await callAI(q, sys);
+      const out = await callAI(q, sys, null, isHardQuestion(q));
       const { text: cleanText, confidence } = extractConfidenceLine(out);
-      typeText(thinking, cleanText, chatEl, () => { appendConfidenceBadge(thinking, confidence); speak(cleanText); });
+      typeText(thinking, cleanText, chatEl, () => { appendConfidenceBadge(thinking, confidence); speak(cleanText); if (isHardQuestion(q)) maybeSuggestBetterModel(chatEl); });
     } catch (e) {
       showError(thinking, e, currentProviderLabel());
     }
@@ -5051,7 +5091,8 @@
   // so restoring a profile must leave them untouched.
   const NON_PROFILE_KEYS = [
     SESSION_KEY, CLOUD_BIN_KEY, CLOUD_SECRET_KEY,
-    ADMIN_KEYS.MODEL, ADMIN_KEYS.SYSPREFIX, ADMIN_KEYS.MAXCHARS, ADMIN_KEYS.TEMP,
+    ADMIN_KEYS.MODEL, ADMIN_KEYS.SMART_MODEL, ADMIN_KEYS.AUTO_UPGRADE,
+    ADMIN_KEYS.SYSPREFIX, ADMIN_KEYS.MAXCHARS, ADMIN_KEYS.TEMP,
     ADMIN_KEYS.LOGS, ADMIN_KEYS.TELE_TOKEN, ADMIN_KEYS.TELE_ENDPOINT,
     ADMIN_KEYS.TELE_NOTICE_SEEN
   ];
@@ -7628,6 +7669,24 @@
   // worker already refuses the OpenAI proxy, but Gemini goes direct to Google
   // and only this client-side guard stops it.
   let aiBlocked = false;
+  // True once the owner unlocks the admin console this session. Gates the
+  // "use a better model" suggestion so it only reaches whoever can act on it.
+  let ownerMode = false;
+  let modelHintShown = false;
+
+  // After a hard task, nudge the owner (once) to enable auto-upgrade if it's
+  // off. Only shows in owner mode — a regular user can't change the model, so
+  // suggesting it to them would be noise.
+  function maybeSuggestBetterModel(el) {
+    if (!ownerMode || autoUpgradeOn() || modelHintShown || !el) return;
+    modelHintShown = true;
+    const t = THEMES[theme] || THEMES.dark;
+    const note = document.createElement('div');
+    note.className = 'gpa-sub';
+    note.style.cssText = `margin-top:6px;font-size:10px;color:${t.sub};`;
+    note.textContent = '⚡ That was a hard one. In the admin console → Power tools, turn on "Auto-upgrade on hard tasks" and set a stronger Smart model — the tool will switch to it automatically for questions like this.';
+    el.appendChild(note);
+  }
 
   function telemetryEndpoint() {
     return ((admGet(ADMIN_KEYS.TELE_ENDPOINT) || '').trim() || TELEMETRY_ENDPOINT || '').replace(/\/+$/, '');
@@ -7866,6 +7925,7 @@
 
     function openAdmin() {
       adminBox.style.display = 'block';
+      ownerMode = true;
       loadPowerToolFields();
       loadTelemetryFields();
       renderUsage();
@@ -8130,22 +8190,84 @@
     });
 
     // ---- Power tools ----
+    // Known OpenAI chat model ids (Sept 2026). The Custom… option future-proofs
+    // the list and covers Gemini ids; an invalid id just returns a clear 404.
+    const MODEL_OPTIONS = [
+      ['', 'Provider default'],
+      ['gpt-4o-mini', 'gpt-4o-mini — fast & cheap'],
+      ['gpt-4o', 'gpt-4o — stronger, multimodal'],
+      ['gpt-4.1-mini', 'gpt-4.1-mini'],
+      ['gpt-4.1', 'gpt-4.1 — strong'],
+      ['gpt-5', 'gpt-5'],
+      ['gpt-5.1', 'gpt-5.1'],
+      ['gpt-5.2', 'gpt-5.2 — top general'],
+      ['o4-mini', 'o4-mini — reasoning (hard math)'],
+      ['__custom__', 'Custom…']
+    ];
+    function fillModelSelect(sel) {
+      sel.innerHTML = MODEL_OPTIONS.map(([v, label]) => `<option value="${v}">${escapeHtml(label)}</option>`).join('');
+    }
+    // Binds a <select> + custom <input> pair to one storage key, saving on
+    // change. Custom… reveals the input; a stored id not in the list shows as
+    // Custom with the input pre-filled.
+    function wireModelPicker(sel, input, key) {
+      const refresh = () => {
+        const v = admGet(key) || '';
+        const known = MODEL_OPTIONS.some((o) => o[0] === v);
+        if (v && !known) { sel.value = '__custom__'; input.style.display = 'block'; input.value = v; }
+        else { sel.value = v; input.style.display = 'none'; input.value = ''; }
+      };
+      sel.addEventListener('change', () => {
+        if (sel.value === '__custom__') { input.style.display = 'block'; input.focus(); return; }
+        input.style.display = 'none';
+        if (sel.value) localStorage.setItem(key, sel.value); else localStorage.removeItem(key);
+        panel.querySelector('#gpa-adm-tools-msg').textContent = 'Saved. Applies to the next AI request.';
+      });
+      input.addEventListener('change', () => {
+        const v = input.value.trim();
+        if (v) localStorage.setItem(key, v); else localStorage.removeItem(key);
+        panel.querySelector('#gpa-adm-tools-msg').textContent = 'Saved. Applies to the next AI request.';
+      });
+      refresh();
+      return refresh;
+    }
+    const modelSel = panel.querySelector('#gpa-adm-model-sel');
+    const smartSel = panel.querySelector('#gpa-adm-smart-sel');
+    fillModelSelect(modelSel);
+    fillModelSelect(smartSel);
+    const refreshBase = wireModelPicker(modelSel, panel.querySelector('#gpa-adm-model'), ADMIN_KEYS.MODEL);
+    const refreshSmart = wireModelPicker(smartSel, panel.querySelector('#gpa-adm-smart'), ADMIN_KEYS.SMART_MODEL);
+
+    const autoUpgradeBtn = panel.querySelector('#gpa-adm-autoupgrade');
+    function refreshAutoUpgrade() {
+      const on = autoUpgradeOn();
+      autoUpgradeBtn.textContent = on ? '⚡ Auto-upgrade on hard tasks: ON' : '⚡ Auto-upgrade on hard tasks: OFF';
+      autoUpgradeBtn.classList.toggle('primary', on);
+    }
+    autoUpgradeBtn.addEventListener('click', () => {
+      const on = !autoUpgradeOn();
+      localStorage.setItem(ADMIN_KEYS.AUTO_UPGRADE, on ? 'on' : 'off');
+      refreshAutoUpgrade();
+      panel.querySelector('#gpa-adm-tools-msg').textContent = on
+        ? (smartModel() ? 'On. Hard tasks will use ' + smartModel() + '.' : 'On — but set a Smart model above, or it falls back to the base model.')
+        : 'Off. Every task uses the base model.';
+    });
+
     function loadPowerToolFields() {
-      panel.querySelector('#gpa-adm-model').value = admGet(ADMIN_KEYS.MODEL) || '';
+      refreshBase(); refreshSmart(); refreshAutoUpgrade();
       panel.querySelector('#gpa-adm-sysprefix').value = admGet(ADMIN_KEYS.SYSPREFIX) || '';
       panel.querySelector('#gpa-adm-maxchars').value = admGet(ADMIN_KEYS.MAXCHARS) || String(MAX_PAGE_CHARS);
       panel.querySelector('#gpa-adm-temp').value = admGet(ADMIN_KEYS.TEMP) || '';
     }
     panel.querySelector('#gpa-adm-save-tools').addEventListener('click', () => {
       const set = (k, v) => { v = String(v).trim(); if (v) localStorage.setItem(k, v); else localStorage.removeItem(k); };
-      set(ADMIN_KEYS.MODEL, panel.querySelector('#gpa-adm-model').value);
       set(ADMIN_KEYS.SYSPREFIX, panel.querySelector('#gpa-adm-sysprefix').value);
       set(ADMIN_KEYS.MAXCHARS, panel.querySelector('#gpa-adm-maxchars').value);
       set(ADMIN_KEYS.TEMP, panel.querySelector('#gpa-adm-temp').value);
       panel.querySelector('#gpa-adm-tools-msg').textContent = 'Saved. Applies to the next AI request.';
     });
     panel.querySelector('#gpa-adm-reset-tools').addEventListener('click', () => {
-      [ADMIN_KEYS.MODEL, ADMIN_KEYS.SYSPREFIX, ADMIN_KEYS.MAXCHARS, ADMIN_KEYS.TEMP].forEach((k) => localStorage.removeItem(k));
+      [ADMIN_KEYS.MODEL, ADMIN_KEYS.SMART_MODEL, ADMIN_KEYS.AUTO_UPGRADE, ADMIN_KEYS.SYSPREFIX, ADMIN_KEYS.MAXCHARS, ADMIN_KEYS.TEMP].forEach((k) => localStorage.removeItem(k));
       loadPowerToolFields();
       panel.querySelector('#gpa-adm-tools-msg').textContent = 'Reset to defaults.';
     });
