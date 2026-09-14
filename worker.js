@@ -28,11 +28,28 @@ export default {
     // Moderation state for one user: active (default), blocked, or locked,
     // plus a kick counter the client compares against to force a one-time
     // sign-out. Read wherever we need to enforce or report it.
+    // The owner is immune to all moderation and always allowed, even in
+    // private mode. Defaults to 'viztrrx'; override with an OWNER env var.
+    const OWNER = String((env && env.OWNER) || 'viztrrx').toLowerCase();
+
     const getMod = async (kv, user) => {
       if (!kv || !user) return { state: 'active', reason: '', kickNonce: 0 };
       const m = await kv.get('mod:' + String(user).toLowerCase(), 'json');
       return m || { state: 'active', reason: '', kickNonce: 0 };
     };
+    const getConfig = async (kv) => (kv && (await kv.get('config', 'json'))) || { privateMode: false };
+
+    // Effective state for one user, combining their own moderation record with
+    // global config. Order: owner is always active; an explicit block/lock
+    // wins next; then private mode blocks anyone without an allow exemption.
+    const resolveState = (mod, cfg, user) => {
+      if (String(user).toLowerCase() === OWNER) return { state: 'active', reason: '', kickNonce: 0, owner: true };
+      if (mod.state === 'blocked') return { state: 'blocked', reason: mod.reason || '', kickNonce: mod.kickNonce || 0 };
+      if (mod.state === 'locked') return { state: 'locked', reason: mod.reason || '', kickNonce: mod.kickNonce || 0 };
+      if (cfg.privateMode && !mod.allow) return { state: 'blocked', reason: mod.reason || 'This tool is currently private — access is limited to the owner.', kickNonce: mod.kickNonce || 0, private: true };
+      return { state: 'active', reason: '', kickNonce: mod.kickNonce || 0 };
+    };
+    const resolve = async (kv, user) => resolveState(await getMod(kv, user), await getConfig(kv), user);
     const sha256hex = async (str) => {
       const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
       return [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, '0')).join('');
@@ -101,19 +118,19 @@ export default {
           }));
         }
       } catch (e) { return json({ ok: false }, 200); }
-      // Hand the caller its own moderation state back on every beat, so a
-      // block/lock/kick reaches them within one heartbeat even without the
-      // separate /status poll.
-      const mod = await getMod(kv, user);
-      return json({ ok: true, state: mod.state || 'active', reason: mod.reason || '', kickNonce: mod.kickNonce || 0 });
+      // Hand the caller its own effective state back on every beat, so a
+      // block/lock/kick/private-mode change reaches them within one heartbeat
+      // even without the separate /status poll.
+      const r = await resolve(kv, user);
+      return json({ ok: true, state: r.state, reason: r.reason, kickNonce: r.kickNonce, owner: !!r.owner, private: !!r.private });
     }
 
     // Read-only status for one user — the client polls this so a block takes
     // effect fast without waiting for the next (write-costing) heartbeat.
     if (url.pathname === '/status' && req.method === 'GET') {
       const kv = env && env.TELEMETRY;
-      const mod = await getMod(kv, url.searchParams.get('user') || '');
-      return json({ state: mod.state || 'active', reason: mod.reason || '', kickNonce: mod.kickNonce || 0 });
+      const r = await resolve(kv, url.searchParams.get('user') || '');
+      return json({ state: r.state, reason: r.reason, kickNonce: r.kickNonce, owner: !!r.owner, private: !!r.private });
     }
 
     // Owner sets a user's moderation state. Token-gated like the other admin
@@ -127,18 +144,35 @@ export default {
       try { body = JSON.parse(await req.text()); } catch (e) { /* tolerate */ }
       const user = String(body.user || '').toLowerCase().slice(0, 80);
       if (!user) return json({ error: 'no user' }, 400);
+      // The owner can never be blocked/locked/kicked.
+      if (user === OWNER) return json({ ok: false, error: 'This user is the owner and is immune to moderation.' }, 200);
       const key = 'mod:' + user;
       const cur = (await kv.get(key, 'json')) || { state: 'active', reason: '', kickNonce: 0 };
       const action = body.action;
-      if (action === 'block') cur.state = 'blocked';
+      if (action === 'block') { cur.state = 'blocked'; cur.allow = false; }
+      else if (action === 'unblock') { cur.state = 'active'; cur.allow = true; }   // explicit allow (exempts from private mode)
       else if (action === 'lock') cur.state = 'locked';
-      else if (action === 'unblock' || action === 'unlock' || action === 'reset') cur.state = 'active';
+      else if (action === 'unlock' || action === 'reset') cur.state = 'active';
       else if (action === 'kick') cur.kickNonce = (cur.kickNonce || 0) + 1;
       else return json({ error: 'unknown action' }, 400);
       cur.reason = String(body.reason || '').slice(0, 300);
       cur.updatedAt = Date.now();
       await kv.put(key, JSON.stringify(cur));
       return json({ ok: true, user, mod: cur });
+    }
+
+    // Global config: currently just private mode (block everyone but owner).
+    if (url.pathname === '/admin/config' && req.method === 'POST') {
+      const kv = env && env.TELEMETRY;
+      const ADMIN = (env && env.ADMIN_TOKEN) || '';
+      if (!kv) return json({ error: 'telemetry KV not bound' }, 500);
+      if (!ADMIN || (url.searchParams.get('token') || '') !== ADMIN) return json({ error: 'unauthorized' }, 401);
+      let body = {};
+      try { body = JSON.parse(await req.text()); } catch (e) { /* tolerate */ }
+      const cfg = await getConfig(kv);
+      if ('privateMode' in body) cfg.privateMode = !!body.privateMode;
+      await kv.put('config', JSON.stringify(cfg));
+      return json({ ok: true, config: cfg, owner: OWNER });
     }
 
     // Owner mints a one-time unlock code for ONE user. We store only its hash,
@@ -180,6 +214,7 @@ export default {
       if (h !== cur.unlock) return json({ ok: false, error: 'invalid code' }, 200);
       cur.state = 'active';
       cur.reason = '';
+      cur.allow = true;             // also exempts them from private mode
       delete cur.unlock;            // single use
       delete cur.unlockAt;
       cur.updatedAt = Date.now();
@@ -201,12 +236,16 @@ export default {
       const ul = await kv.list({ prefix: 'user:' });
       for (const k of ul.keys) { const v = await kv.get(k.name, 'json'); if (v) users.push(v); }
 
-      // Moderation states, so the admin sees who's blocked/locked at a glance.
+      // Effective states, so the admin sees who's blocked/locked/private and
+      // who the owner is at a glance.
+      const cfg = await getConfig(kv);
       const mods = {};
       const ml = await kv.list({ prefix: 'mod:' });
       for (const k of ml.keys) { const v = await kv.get(k.name, 'json'); if (v) mods[k.name.slice(4)] = v; }
-      const stateOf = (u) => (mods[String(u).toLowerCase()] || {}).state || 'active';
-      const reasonOf = (u) => (mods[String(u).toLowerCase()] || {}).reason || '';
+      const stampOne = (x) => {
+        const r = resolveState(mods[String(x.user).toLowerCase()] || { state: 'active' }, cfg, x.user);
+        return { ...x, state: r.state, reason: r.reason, owner: !!r.owner, private: !!r.private };
+      };
 
       // Collapse multiple live sessions from one user into a single presence.
       const activeByUser = {};
@@ -214,12 +253,13 @@ export default {
         const u = activeByUser[s.user];
         if (!u || s.lastSeen > u.lastSeen) activeByUser[s.user] = s;
       });
-      const stamp = (arr) => arr.map((x) => ({ ...x, state: stateOf(x.user), reason: reasonOf(x.user) }));
       return json({
         now: Date.now(),
+        owner: OWNER,
+        privateMode: !!cfg.privateMode,
         activeCount: Object.keys(activeByUser).length,
-        active: stamp(Object.values(activeByUser).sort((a, b) => b.lastSeen - a.lastSeen)),
-        users: stamp(users.sort((a, b) => b.lastSeen - a.lastSeen))
+        active: Object.values(activeByUser).sort((a, b) => b.lastSeen - a.lastSeen).map(stampOne),
+        users: users.sort((a, b) => b.lastSeen - a.lastSeen).map(stampOne)
       });
     }
 
@@ -280,9 +320,9 @@ export default {
     // own key in direct mode — those bypass the worker entirely.)
     const modUser = req.headers.get('X-GPA-User');
     if (modUser && env && env.TELEMETRY) {
-      const m = await getMod(env.TELEMETRY, modUser);
-      if (m.state === 'blocked') {
-        return json({ error: { message: 'Access to this tool has been blocked by the owner.' + (m.reason ? ' ' + m.reason : ''), type: 'blocked_by_owner' } }, 403);
+      const r = await resolve(env.TELEMETRY, modUser);   // owner resolves to active
+      if (r.state === 'blocked') {
+        return json({ error: { message: 'Access to this tool has been blocked by the owner.' + (r.reason ? ' ' + r.reason : ''), type: 'blocked_by_owner' } }, 403);
       }
     }
 
