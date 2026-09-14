@@ -704,6 +704,9 @@
               <button id="gpa-tele-refresh" class="gpa-btn primary" style="flex:1;">🔄 Load live users</button>
               <button id="gpa-tele-auto" class="gpa-btn" style="flex:1;">▶ Auto-refresh: OFF</button>
             </div>
+            <div class="gpa-row" style="margin-top:6px;">
+              <button id="gpa-tele-private" class="gpa-btn" style="flex:1;">🌍 Private mode: OFF (everyone allowed)</button>
+            </div>
             <div id="gpa-tele-live" style="margin-top:8px;"></div>
             <div id="gpa-tele-msg" class="gpa-sub" style="margin-top:4px;"></div>
           </div>
@@ -7963,13 +7966,15 @@
       const h = Math.round(m / 60);
       return h < 24 ? h + 'h ago' : Math.round(h / 24) + 'd ago';
     }
-    function stateBadge(state) {
+    function stateBadge(state, owner) {
+      if (owner) return '<span style="color:#22c55e;font-weight:700;">👑 OWNER · immune</span>';
       if (state === 'blocked') return '<span style="color:#ff6b6b;font-weight:700;">⛔ blocked</span>';
       if (state === 'locked') return '<span style="color:#eab308;font-weight:700;">🔒 locked</span>';
       return '';
     }
     // The moderation buttons for one user, keyed by username via data-attrs.
-    function modButtons(user, state) {
+    function modButtons(user, state, owner) {
+      if (owner) return '';   // the owner can't be moderated
       const b = (action, label, title) =>
         `<button class="gpa-btn gpa-mod-btn" data-mod-user="${escapeHtml(user)}" data-mod-action="${action}" title="${title}"`
         + ` style="font-size:9px;padding:2px 6px;">${label}</button>`;
@@ -7985,20 +7990,27 @@
       parts.push(b('kick', '👢 Kick', 'Force a one-time sign-out'));
       return `<div class="gpa-row" style="gap:4px;margin-top:4px;flex-wrap:wrap;">${parts.join('')}</div>`;
     }
+    function updatePrivateBtn(on) {
+      const btn = panel.querySelector('#gpa-tele-private');
+      btn.textContent = on ? '🔒 Private mode: ON (only the owner)' : '🌍 Private mode: OFF (everyone allowed)';
+      btn.classList.toggle('primary', on);
+      btn.dataset.on = on ? '1' : '0';
+    }
     function renderLive(data) {
       const active = data.active || [];
       const users = data.users || [];
+      updatePrivateBtn(!!data.privateMode);
       const dot = '<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#22c55e;margin-right:5px;box-shadow:0 0 6px #22c55e;"></span>';
-      const row = (name, meta, state) =>
+      const row = (name, meta, state, owner) =>
         `<div class="gpa-admin-userrow" style="flex-direction:column;align-items:stretch;">`
         + `<div class="gpa-row" style="justify-content:space-between;gap:8px;">`
-        + `<span>${dot}<b>${escapeHtml(name)}</b> ${stateBadge(state)}</span>`
+        + `<span>${dot}<b>${escapeHtml(name)}</b> ${stateBadge(state, owner)}</span>`
         + `<span style="opacity:0.8;">${escapeHtml(meta)}</span></div>`
-        + modButtons(name, state) + `</div>`;
+        + modButtons(name, state, owner) + `</div>`;
       const activeRows = active.map((s) =>
-        row(s.user, [s.host, s.region, s.country].filter(Boolean).join(' · ') + ' · ' + ago(s.lastSeen), s.state)).join('');
+        row(s.user, [s.host, s.region, s.country].filter(Boolean).join(' · ') + ' · ' + ago(s.lastSeen), s.state, s.owner)).join('');
       const userRows = users.map((u) =>
-        row(u.user, (u.opens || 0) + '× · ' + [u.country, u.region].filter(Boolean).join(' · ') + ' · last ' + ago(u.lastSeen), u.state)).join('');
+        row(u.user, (u.opens || 0) + '× · ' + [u.country, u.region].filter(Boolean).join(' · ') + ' · last ' + ago(u.lastSeen), u.state, u.owner)).join('');
       teleLive.innerHTML =
         `<div class="gpa-admin-statcard" style="margin-bottom:8px;"><span class="n">${data.activeCount || 0}</span><div class="l">active right now</div></div>`
         + `<div class="gpa-sub" style="margin:4px 0;">Active now</div>`
@@ -8077,6 +8089,28 @@
       }
     }
     panel.querySelector('#gpa-tele-refresh').addEventListener('click', loadLive);
+    panel.querySelector('#gpa-tele-private').addEventListener('click', async () => {
+      const token = teleToken.value.trim();
+      const base = (teleEndpoint.value.trim() || TELEMETRY_ENDPOINT || '').replace(/\/+$/, '');
+      if (!token || !base) { teleMsg.textContent = 'Set the worker URL and admin token first.'; return; }
+      const turningOn = panel.querySelector('#gpa-tele-private').dataset.on !== '1';
+      if (turningOn && !confirm('Turn on private mode? Everyone except the owner will be blocked from using the tool.')) return;
+      teleMsg.textContent = turningOn ? 'Enabling private mode…' : 'Disabling private mode…';
+      try {
+        const res = await fetch(base + '/admin/config?token=' + encodeURIComponent(token), {
+          method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify({ privateMode: turningOn })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+        updatePrivateBtn(!!(data.config && data.config.privateMode));
+        teleMsg.textContent = (data.config && data.config.privateMode)
+          ? `Private mode ON. Only "${(data.owner || 'the owner')}" can use the tool now; everyone else sees the blocked page within ~15s.`
+          : 'Private mode OFF. Everyone can use the tool again (except anyone individually blocked).';
+        loadLive();
+      } catch (e) {
+        teleMsg.textContent = 'Could not change private mode: ' + e.message;
+      }
+    });
     teleAutoBtn.addEventListener('click', () => {
       if (teleAutoTimer) {
         clearInterval(teleAutoTimer); teleAutoTimer = null;
