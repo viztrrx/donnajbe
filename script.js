@@ -1067,6 +1067,12 @@
         font-size: 9px; font-weight: 700; padding: 1px 6px; border-radius: 8px; margin-top: 1px;
       }
       .gpa-confidence-line { margin-top: 8px; }
+      /* "Answered by" attribution under every AI response */
+      .gpa-model-badge {
+        margin-top: 6px; font-size: 9.5px; line-height: 1.4; color: ${t.sub};
+        opacity: 0.85; letter-spacing: 0.2px; word-break: break-word;
+        font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
       .gpa-conf-high { background: rgba(34, 197, 94, 0.18); color: #22c55e; }
       .gpa-conf-mid { background: rgba(234, 179, 8, 0.18); color: #eab308; }
       .gpa-conf-low { background: rgba(239, 68, 68, 0.18); color: #ef4444; }
@@ -2288,7 +2294,9 @@
     const body = { contents: [{ role: 'user', parts }] };
     if (systemText) body.systemInstruction = { parts: [{ text: systemText }] };
 
-    const res = await rawFetch(`${API_BASE}${effectiveModel(MODEL, hard)}:generateContent?key=${key}`, {
+    const geminiModel = effectiveModel(MODEL, hard);
+    noteModelUsed(geminiModel, 'Gemini', hard);
+    const res = await rawFetch(`${API_BASE}${geminiModel}:generateContent?key=${key}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
@@ -2510,6 +2518,7 @@
       : 'https://api.openai.com/v1/chat/completions';
 
     payload.model = effectiveModel(OPENAI_MODEL, hard);
+    noteModelUsed(payload.model, 'OpenAI', hard);
     const temp = effectiveTemp();
     if (temp !== null) payload.temperature = temp;
 
@@ -3914,10 +3923,11 @@
           grid
         );
         renderAnswerGrid(scanOutput, verified);
+        appendModelBadge(scanOutput);
         maybeSuggestBetterModel(scanOutput);
         highlightSnippetsOnPage(verified.map((it) => it.h).filter(Boolean));
       } else {
-        typeText(scanOutput, out, scanOutput);
+        typeText(scanOutput, out, scanOutput, () => appendModelBadge(scanOutput));
       }
     } catch (e) {
       showError(scanOutput, e, currentProviderLabel());
@@ -3965,6 +3975,7 @@
       const grid = tryParseAnswerGrid(out);
       if (grid) {
         renderTutorGrid(scanOutput, grid);
+        appendModelBadge(scanOutput);
         maybeSuggestBetterModel(scanOutput);
         highlightSnippetsOnPage(grid.map((it) => it.h).filter(Boolean));
         startAutoFollow(grid);
@@ -4080,6 +4091,7 @@
         const { text: cleanText, confidence } = extractConfidenceLine(t1);
         typeText(scanOutput, cleanText, scanOutput, () => {
           appendConfidenceBadge(scanOutput, confidence);
+          appendModelBadge(scanOutput);
           addSaveButton(scanOutput, cleanText);
           if (highlightsRaw) {
             try {
@@ -4115,6 +4127,7 @@
       if (grid) {
         const verified = mergeHighlightField(await verifyGridAnswers(textPart, grid, images), grid);
         renderAnswerGrid(scanOutput, verified);
+        appendModelBadge(scanOutput);
         if (hard) maybeSuggestBetterModel(scanOutput);
         highlightSnippetsOnPage(verified.map((it) => it.h).filter(Boolean));
       } else {
@@ -4122,6 +4135,7 @@
         const { text: cleanText, confidence } = extractConfidenceLine(t1);
         typeText(scanOutput, cleanText, scanOutput, () => {
           appendConfidenceBadge(scanOutput, confidence);
+          appendModelBadge(scanOutput);
           addSaveButton(scanOutput, cleanText);
           if (highlightSnippet) highlightSnippetOnPage(highlightSnippet);
         });
@@ -4350,7 +4364,7 @@
       const sys = 'You are a helpful, concise assistant. ' + CAPABILITIES_BRIEF + ' Reply in plain conversational sentences only — no markdown formatting (no asterisks, headers, or lists) since this is shown as plain text. Keep answers as short as possible while still being useful. Then, on its own final line, write exactly "CONFIDENCE: NN" where NN (0-100) is your confidence that the answer is accurate.';
       const out = await callAI(q, sys, null, isHardQuestion(q));
       const { text: cleanText, confidence } = extractConfidenceLine(out);
-      typeText(thinking, cleanText, chatEl, () => { appendConfidenceBadge(thinking, confidence); speak(cleanText); if (isHardQuestion(q)) maybeSuggestBetterModel(chatEl); });
+      typeText(thinking, cleanText, chatEl, () => { appendConfidenceBadge(thinking, confidence); appendModelBadge(thinking); speak(cleanText); if (isHardQuestion(q)) maybeSuggestBetterModel(chatEl); });
     } catch (e) {
       showError(thinking, e, currentProviderLabel());
     }
@@ -4476,6 +4490,7 @@
           src.className = 'gpa-sel-pop-src';
           src.textContent = selectedText.slice(0, 120) + (selectedText.length > 120 ? '…' : '');
           pop.appendChild(src);
+          appendModelBadge(pop);
         })
         .catch((e) => { pop.textContent = 'AI error: ' + (e && e.message || e); });
       pop.addEventListener('click', removePop);
@@ -4562,7 +4577,7 @@
           res.className = 'gpa-msg ai';
           res.style.marginTop = '6px';
           div.appendChild(res);
-          typeText(res, stripConfidence(out), scanOutput, () => addSaveButton(res, stripConfidence(out)));
+          typeText(res, stripConfidence(out), scanOutput, () => { appendModelBadge(res); addSaveButton(res, stripConfidence(out)); });
         } catch (e) {
           showError(div, e, currentProviderLabel());
         }
@@ -4904,7 +4919,7 @@
       const rep = document.createElement('div');
       rep.className = 'gpa-msg ai';
       out.appendChild(rep);
-      typeText(rep, clean, out, () => { addSaveButton(rep, clean); speak(clean); });
+      typeText(rep, clean, out, () => { appendModelBadge(rep); addSaveButton(rep, clean); speak(clean); });
     } catch (e) {
       showError(out, e, currentProviderLabel());
     }
@@ -5016,6 +5031,7 @@
       rep.className = 'gpa-msg ai';
       out.appendChild(rep);
       typeText(rep, notes, out, () => {
+        appendModelBadge(rep);
         addSaveButton(rep, notes);
         const qRow = panel.querySelector('#gpa-notes-q-row');
         qRow.style.display = 'flex';
@@ -5051,10 +5067,11 @@
     const sys = 'You answer questions about a passage the user is studying. For anything about the passage, rely on the PASSAGE, NOTES, RESEARCH and chat history — quote or paraphrase it accurately; if something is not covered there, say so plainly and answer generally if you can. Otherwise you are a helpful, concise assistant. Plain text only — no markdown symbols. End with a final line "CONFIDENCE: NN" (0-100).';
     const userText = `PASSAGE (titled "${notesState.title}"):\n${notesState.passage}\n\nNOTES ALREADY WRITTEN:\n${notesState.notes}\n\nRESEARCH EXCERPTS:\n${researchText || '(none)'}\n\nRECENT CHAT:\n${history || '(none)'}\n\nNEW QUESTION: ${q}`;
     try {
-      const out = await callAI(userText, sys);
+      const out = await callAI(userText, sys, null, isHardQuestion(q));
       const { text: cleanText, confidence } = extractConfidenceLine(out);
       typeText(aiMsg, cleanText, chat, () => {
         appendConfidenceBadge(aiMsg, confidence);
+        appendModelBadge(aiMsg);
         notesState.chat.push({ role: 'user', text: q }, { role: 'ai', text: cleanText });
         if (notesState.chat.length > 24) notesState.chat = notesState.chat.slice(-16);
         saveNotesState();
@@ -7674,6 +7691,36 @@
   let ownerMode = false;
   let modelHintShown = false;
 
+  // ---- "Answered by" attribution -------------------------------------------
+  // Records which model and provider actually served the most recent request,
+  // so every rendered answer can say where it came from. Set at request time
+  // by callGemini/callOpenAI, read by appendModelBadge right after the answer
+  // renders. Calls are sequential per user action, so one slot is enough.
+  let lastAIModel = '';
+  let lastAIProvider = '';
+  let lastAIUpgraded = false;
+
+  function noteModelUsed(model, provider, hard) {
+    lastAIModel = model || '';
+    lastAIProvider = provider || '';
+    // True when auto-upgrade actually swapped in the smart model for this call.
+    lastAIUpgraded = !!(hard && autoUpgradeOn() && smartModel() && model === smartModel());
+  }
+
+  // Appends "🤖 <model> · <provider>" under an answer. Safe to call anywhere;
+  // does nothing if no request has been made yet, and never appends twice to
+  // the same container.
+  function appendModelBadge(el) {
+    if (!el || !lastAIModel) return;
+    if (el.querySelector && el.querySelector(':scope > .gpa-model-badge')) {
+      el.querySelector(':scope > .gpa-model-badge').remove();
+    }
+    const badge = document.createElement('div');
+    badge.className = 'gpa-model-badge';
+    badge.textContent = `🤖 ${lastAIModel} · ${lastAIProvider}${lastAIUpgraded ? ' · auto-upgraded for a hard task' : ''}`;
+    el.appendChild(badge);
+  }
+
   // After a hard task, nudge the owner (once) to enable auto-upgrade if it's
   // off. Only shows in owner mode — a regular user can't change the model, so
   // suggesting it to them would be noise.
@@ -8282,6 +8329,7 @@
         // any saved context, which is usually what a power user wants to test.
         const res = await callAI(userMsg, sysMsg || undefined);
         out.textContent = res;
+        appendModelBadge(out);
       } catch (e) {
         out.textContent = 'Error: ' + ((e && e.message) || e);
       }
