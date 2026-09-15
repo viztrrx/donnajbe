@@ -326,6 +326,7 @@
         <div class="gpa-dropdown-menu" id="gpa-dropdown-menu">
           <button class="gpa-dropdown-item active" data-tab="scan">Page Insights</button>
           <button class="gpa-dropdown-item" data-tab="ask">Ask AI</button>
+          <button class="gpa-dropdown-item" data-tab="chat">Chat</button>
           <button class="gpa-dropdown-item" data-tab="music">Music</button>
           <button class="gpa-dropdown-item" data-tab="browser">Browser</button>
           <button class="gpa-dropdown-item" data-tab="games">Games</button>
@@ -391,6 +392,19 @@
           <input id="gpa-ask-input" class="gpa-input" placeholder="Ask me anything…" />
           <button id="gpa-ask-btn" class="gpa-btn primary">Send</button>
           <button id="gpa-voice-btn" class="gpa-btn" title="Speak your question">🎙</button>
+        </div>
+      </div>
+
+      <div class="gpa-pane" data-pane="chat">
+        <div class="gpa-row" style="flex-wrap:wrap;">
+          <select id="gpa-chat-room" class="gpa-input" style="flex:1;"></select>
+          <button id="gpa-chat-join" class="gpa-btn" title="Join a private room with a code">🔑 Join</button>
+        </div>
+        <div id="gpa-chat-note" class="gpa-sub" style="margin:4px 0;"></div>
+        <div id="gpa-chat-log" class="gpa-chat-log"></div>
+        <div class="gpa-row" style="margin-top:6px;">
+          <input id="gpa-chat-input" class="gpa-input" placeholder="Message…" maxlength="500" autocomplete="off" />
+          <button id="gpa-chat-send" class="gpa-btn primary">Send</button>
         </div>
       </div>
 
@@ -473,6 +487,16 @@
           <button class="gpa-btn game-btn" data-game="tetris">Tetris</button>
           <button class="gpa-btn game-btn" data-game="checkers">Checkers</button>
           <button class="gpa-btn game-btn" data-game="sudoku">Sudoku</button>
+          <button class="gpa-btn game-btn" data-game="pong">Pong</button>
+          <button class="gpa-btn game-btn" data-game="lightsout">Lights Out</button>
+          <button class="gpa-btn game-btn" data-game="fifteen">15-Puzzle</button>
+          <button class="gpa-btn game-btn" data-game="hanoi">Hanoi</button>
+          <button class="gpa-btn game-btn" data-game="mastermind">Mastermind</button>
+          <button class="gpa-btn game-btn" data-game="blackjack">Blackjack</button>
+          <button class="gpa-btn game-btn" data-game="typing">Typing Test</button>
+          <button class="gpa-btn game-btn" data-game="mathsprint">Math Sprint</button>
+          <button class="gpa-btn game-btn" data-game="maze">Maze</button>
+          <button class="gpa-btn game-btn" data-game="invaders">Invaders</button>
         </div>
         <div class="gpa-row" style="margin-top:6px;">
           <button id="gpa-game-restart" class="gpa-btn">🔄 Restart</button>
@@ -704,8 +728,10 @@
 
           <div class="gpa-admin-tabs">
             <button class="gpa-admin-tab primary" data-atab="usage">📊 Usage</button>
+            <button class="gpa-admin-tab" data-atab="control">🎛 Control</button>
             <button class="gpa-admin-tab" data-atab="tools">⚙️ Power tools</button>
             <button class="gpa-admin-tab" data-atab="data">🗄 Data</button>
+            <button class="gpa-admin-tab" data-atab="diag">🩺 Diagnostics</button>
           </div>
 
           <!-- Usage / logs -->
@@ -743,6 +769,54 @@
             </div>
             <div id="gpa-tele-live" style="margin-top:8px;"></div>
             <div id="gpa-tele-msg" class="gpa-sub" style="margin-top:4px;"></div>
+          </div>
+
+          <!-- Control: things pushed to everyone -->
+          <div class="gpa-admin-pane" data-apane="control">
+            <div class="gpa-admin-note">
+              These push to every client on its next status poll (~15s). They need the worker's
+              KV and ADMIN_TOKEN set up, and the admin token entered on the Usage tab.
+            </div>
+            <div class="gpa-sub" style="margin:10px 0 4px;">📢 Broadcast banner — shown to everyone</div>
+            <textarea id="gpa-adm-broadcast" class="gpa-sync-box" style="height:52px;" placeholder="e.g. Heads up: quizzes are disabled during the exam."></textarea>
+            <div class="gpa-row" style="flex-wrap:wrap;">
+              <button id="gpa-adm-broadcast-send" class="gpa-btn primary" style="flex:1;">Send to everyone</button>
+              <button id="gpa-adm-broadcast-clear" class="gpa-btn" style="flex:1;">Clear banner</button>
+            </div>
+            <div class="gpa-sub" style="margin:14px 0 4px;">📣 Announcement popup — everyone must dismiss it</div>
+            <div class="gpa-row">
+              <input id="gpa-adm-ann-title" class="gpa-input" placeholder="Title" maxlength="80" autocomplete="off" />
+            </div>
+            <textarea id="gpa-adm-ann-text" class="gpa-sync-box" style="height:52px;" placeholder="The announcement everyone will see as a popup…"></textarea>
+            <div class="gpa-row" style="flex-wrap:wrap;">
+              <button id="gpa-adm-ann-send" class="gpa-btn primary" style="flex:1;">Pop up for everyone</button>
+              <button id="gpa-adm-ann-clear" class="gpa-btn" style="flex:1;">Clear</button>
+            </div>
+
+            <div class="gpa-sub" style="margin:14px 0 4px;">💬 Private chat rooms</div>
+            <div class="gpa-row">
+              <input id="gpa-adm-room-name" class="gpa-input" placeholder="New room name" maxlength="40" autocomplete="off" />
+              <button id="gpa-adm-room-create" class="gpa-btn">Create</button>
+            </div>
+            <div id="gpa-adm-rooms" class="gpa-admin-users" style="max-height:130px;margin-top:6px;"></div>
+
+            <div class="gpa-sub" style="margin:14px 0 4px;">🔄 Force everyone to update</div>
+            <div class="gpa-row">
+              <button id="gpa-adm-force-reload" class="gpa-btn" style="flex:1;">Push reload to all clients</button>
+            </div>
+            <div class="gpa-sub" style="margin-top:4px;">Every open copy re-fetches the script and restarts itself.</div>
+            <div class="gpa-sub" style="margin:14px 0 4px;">🚦 Feature switches — off hides it for everyone but you</div>
+            <div id="gpa-adm-flags" class="gpa-row" style="flex-wrap:wrap;"></div>
+            <div id="gpa-adm-control-msg" class="gpa-sub" style="margin-top:6px;"></div>
+          </div>
+
+          <!-- Diagnostics -->
+          <div class="gpa-admin-pane" data-apane="diag">
+            <div class="gpa-row" style="flex-wrap:wrap;">
+              <button id="gpa-adm-diag-run" class="gpa-btn primary" style="flex:1;">🩺 Run checks</button>
+              <button id="gpa-adm-diag-copy" class="gpa-btn" style="flex:1;">📋 Copy report</button>
+            </div>
+            <div id="gpa-adm-diag" class="gpa-admin-log" style="margin-top:8px;max-height:260px;"></div>
           </div>
 
           <!-- Power tools -->
@@ -790,7 +864,9 @@
 
           <!-- Data -->
           <div class="gpa-admin-pane" data-apane="data">
-            <div class="gpa-sub" style="margin:4px 0 4px;">Every gpa_* value in this browser (editable)</div>
+            <div class="gpa-sub" style="margin:4px 0 4px;">🔑 API keys on this device</div>
+            <div id="gpa-adm-keys" class="gpa-admin-users" style="max-height:none;"></div>
+            <div class="gpa-sub" style="margin:14px 0 4px;">Every gpa_* value in this browser (editable)</div>
             <div id="gpa-adm-ls" class="gpa-admin-ls"></div>
             <div class="gpa-row" style="margin-top:8px; flex-wrap:wrap;">
               <button id="gpa-adm-ls-refresh" class="gpa-btn" style="flex:1;">↻ Refresh</button>
@@ -1115,6 +1191,32 @@
         font-size: 9px; font-weight: 700; padding: 1px 6px; border-radius: 8px; margin-top: 1px;
       }
       .gpa-confidence-line { margin-top: 8px; }
+      /* ---- Chat ---- */
+      .gpa-chat-log {
+        flex: 1; min-height: 120px; max-height: 260px; overflow-y: auto;
+        display: flex; flex-direction: column; gap: 5px; padding: 6px;
+        background: ${t.field}; border: 1px solid ${t.border}; border-radius: 7px;
+      }
+      .gpa-chat-msg { font-size: 11.5px; line-height: 1.45; overflow-wrap: anywhere; }
+      .gpa-chat-msg .who { font-weight: 700; color: ${t.accent}; margin-right: 4px; }
+      .gpa-chat-msg.mine .who { color: #22c55e; }
+      .gpa-chat-msg.owner .who::after { content: ' 👑'; }
+      .gpa-chat-msg .when { font-size: 9px; color: ${t.sub}; margin-left: 5px; }
+      .gpa-chat-empty { color: ${t.sub}; font-size: 11px; text-align: center; padding: 14px 0; }
+      /* ---- Announcement modal ---- */
+      .gpa-ann-backdrop {
+        position: absolute; inset: 0; z-index: 2147482000; display: flex;
+        align-items: center; justify-content: center; padding: 18px;
+        background: rgba(0,0,0,0.72); backdrop-filter: blur(3px);
+      }
+      .gpa-ann-card {
+        max-width: 300px; width: 100%; background: ${t.panel};
+        border: 1px solid ${t.accent}; border-radius: 12px; padding: 16px;
+        box-shadow: 0 14px 44px rgba(0,0,0,0.6); text-align: center;
+      }
+      .gpa-ann-title { font: 700 14px/1.3 ui-monospace, monospace; color: ${t.accent}; margin-bottom: 8px; }
+      .gpa-ann-text { font: 12px/1.55 ui-monospace, monospace; color: ${t.text}; white-space: pre-wrap; overflow-wrap: anywhere; }
+      .gpa-ann-ok { margin-top: 14px; }
       /* "Answered by" attribution under every AI response */
       .gpa-model-badge {
         margin-top: 6px; font-size: 9.5px; line-height: 1.4; color: ${t.sub};
@@ -1840,6 +1942,7 @@
       dropdownLabel.textContent = item.textContent;
       dropdown.classList.remove('open');
       if (item.dataset.tab !== 'games') stopActiveGame();
+      if (item.dataset.tab === 'chat' && typeof startChatPolling === 'function') startChatPolling();
       if (item.dataset.tab === 'saved') renderSavedInsights();
       if (item.dataset.tab === 'study') renderDeck();
       // A hidden pane measures as zero, so games can only be sized once
@@ -4616,6 +4719,147 @@
   askBtn.addEventListener('click', sendChat);
   askInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendChat(); });
 
+  // ---- Chat -----------------------------------------------------------------
+  // A public room everyone shares, plus private rooms you join with a code the
+  // owner hands out. Codes are kept locally per room so you only enter one
+  // once. Polling only runs while the Chat tab is actually open — no point
+  // spending requests on a tab nobody is looking at.
+  const CHAT_ROOMS_KEY = 'gpa_chat_rooms';      // { id: {name, code} } joined privately
+  const chatRoomSel = panel.querySelector('#gpa-chat-room');
+  const chatLog = panel.querySelector('#gpa-chat-log');
+  const chatInput = panel.querySelector('#gpa-chat-input');
+  const chatNote = panel.querySelector('#gpa-chat-note');
+  let chatRoom = 'public';
+  let chatSince = 0;
+  let chatTimer = null;
+  let chatSeen = new Set();
+
+  function joinedRooms() {
+    try { return JSON.parse(localStorage.getItem(CHAT_ROOMS_KEY) || '{}') || {}; } catch (e) { return {}; }
+  }
+  function saveJoinedRooms(r) { try { localStorage.setItem(CHAT_ROOMS_KEY, JSON.stringify(r)); } catch (e) { /* quota */ } }
+  function chatCodeFor(id) { return id === 'public' ? '' : (joinedRooms()[id] || {}).code || ''; }
+
+  function renderRoomOptions() {
+    const rooms = joinedRooms();
+    chatRoomSel.innerHTML = '<option value="public"># public</option>'
+      + Object.keys(rooms).map((id) => `<option value="${escapeHtml(id)}">🔒 ${escapeHtml(rooms[id].name || id)}</option>`).join('');
+    chatRoomSel.value = chatRoom;
+    if (chatRoomSel.value !== chatRoom) { chatRoom = 'public'; chatRoomSel.value = 'public'; }
+  }
+
+  function chatMsgEl(m) {
+    const div = document.createElement('div');
+    div.className = 'gpa-chat-msg'
+      + (currentUser && m.u === currentUser ? ' mine' : '')
+      + (m.owner ? ' owner' : '');
+    const who = document.createElement('span');
+    who.className = 'who';
+    who.textContent = m.u + ':';
+    const body = document.createElement('span');
+    body.textContent = ' ' + m.t;
+    const when = document.createElement('span');
+    when.className = 'when';
+    when.textContent = new Date(m.ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    div.appendChild(who); div.appendChild(body); div.appendChild(when);
+    return div;
+  }
+
+  async function chatPoll() {
+    if (!telemetryOn()) { chatNote.textContent = 'Chat needs the worker to be set up.'; return; }
+    const base = telemetryEndpoint();
+    const params = new URLSearchParams({ room: chatRoom, since: String(chatSince) });
+    const code = chatCodeFor(chatRoom);
+    if (code) params.set('code', code);
+    try {
+      const res = await fetch(base + '/chat/poll?' + params.toString(), { cache: 'no-store' });
+      const data = await res.json().catch(() => ({}));
+      if (!data.ok) { chatNote.textContent = data.error || 'Could not load messages.'; return; }
+      chatNote.textContent = '';
+      const atBottom = chatLog.scrollHeight - chatLog.scrollTop - chatLog.clientHeight < 40;
+      let added = 0;
+      (data.messages || []).forEach((m) => {
+        const id = m.ts + '|' + m.u + '|' + m.t;
+        if (chatSeen.has(id)) return;
+        chatSeen.add(id);
+        chatLog.appendChild(chatMsgEl(m));
+        chatSince = Math.max(chatSince, m.ts);
+        added++;
+      });
+      const empty = chatLog.querySelector('.gpa-chat-empty');
+      if (chatLog.children.length && empty) empty.remove();
+      if (!chatLog.children.length) chatLog.innerHTML = '<div class="gpa-chat-empty">No messages yet — say something.</div>';
+      // Only auto-scroll if they were already at the bottom, so reading back
+      // through history isn't yanked away by an incoming message.
+      if (added && atBottom) chatLog.scrollTop = chatLog.scrollHeight;
+    } catch (e) {
+      chatNote.textContent = 'Offline — messages will load when you reconnect.';
+    }
+  }
+
+  function switchChatRoom(id) {
+    chatRoom = id;
+    chatSince = 0;
+    chatSeen = new Set();
+    chatLog.innerHTML = '<div class="gpa-chat-empty">Loading…</div>';
+    chatPoll();
+  }
+
+  function startChatPolling() {
+    if (chatTimer) return;
+    chatPoll();
+    chatTimer = setInterval(() => {
+      const pane = panel.querySelector('.gpa-pane[data-pane="chat"]');
+      if (pane && pane.classList.contains('active')) chatPoll();
+    }, 6000);
+  }
+
+  async function chatSend() {
+    const text = chatInput.value.trim();
+    if (!text) return;
+    if (!currentUser) { chatNote.textContent = 'Sign in first.'; return; }
+    if (!telemetryOn()) { chatNote.textContent = 'Chat needs the worker to be set up.'; return; }
+    chatInput.value = '';
+    try {
+      const res = await fetch(telemetryEndpoint() + '/chat/send', {
+        method: 'POST', headers: { 'Content-Type': 'text/plain' },
+        body: JSON.stringify({ room: chatRoom, user: currentUser, text, code: chatCodeFor(chatRoom) })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!data.ok) { chatNote.textContent = data.error || 'Message not sent.'; chatInput.value = text; return; }
+      chatPoll();
+    } catch (e) {
+      chatNote.textContent = 'Could not send — check your connection.';
+      chatInput.value = text;
+    }
+  }
+
+  chatRoomSel.addEventListener('change', () => switchChatRoom(chatRoomSel.value));
+  panel.querySelector('#gpa-chat-send').addEventListener('click', chatSend);
+  chatInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') chatSend(); });
+  panel.querySelector('#gpa-chat-join').addEventListener('click', async () => {
+    const code = (prompt('Room code from the owner:') || '').trim().toUpperCase();
+    if (!code) return;
+    const id = (prompt('Room name or id (as the owner gave it):') || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    if (!id) return;
+    chatNote.textContent = 'Checking…';
+    try {
+      const res = await fetch(telemetryEndpoint() + `/chat/poll?room=${encodeURIComponent(id)}&since=0&code=${encodeURIComponent(code)}`);
+      const data = await res.json().catch(() => ({}));
+      if (!data.ok) { chatNote.textContent = data.error || 'Could not join.'; return; }
+      const rooms = joinedRooms();
+      rooms[id] = { name: id, code };
+      saveJoinedRooms(rooms);
+      renderRoomOptions();
+      chatRoomSel.value = id;
+      switchChatRoom(id);
+      chatNote.textContent = 'Joined 🔒 ' + id;
+    } catch (e) {
+      chatNote.textContent = 'Could not reach the server.';
+    }
+  });
+  renderRoomOptions();
+
   // ---- Extended tools -------------------------------------------------------
   // Voice input, read-aloud, text-selection assistant, table extractor, page
   // watcher, natural-language page commands, flashcards, scratchpad, pomodoro
@@ -5355,7 +5599,7 @@
     ADMIN_KEYS.MODEL, ADMIN_KEYS.SMART_MODEL, ADMIN_KEYS.AUTO_UPGRADE,
     ADMIN_KEYS.SYSPREFIX, ADMIN_KEYS.MAXCHARS, ADMIN_KEYS.TEMP,
     ADMIN_KEYS.LOGS, ADMIN_KEYS.TELE_TOKEN, ADMIN_KEYS.TELE_ENDPOINT,
-    ADMIN_KEYS.TELE_NOTICE_SEEN, 'gpa_script_src'
+    ADMIN_KEYS.TELE_NOTICE_SEEN, 'gpa_script_src', 'gpa_chat_rooms', 'gpa_ann_seen'
   ];
 
   const loginOverlay = panel.querySelector('#gpa-login');
@@ -7571,13 +7815,752 @@
     };
   }
 
+  // ===== Additional games ====================================================
+  // Same contract as the others: build into `root`, return either a cleanup
+  // function or { cleanup, stats, options, pause, resume }.
+
+  // ---- Pong (vs CPU) ----
+  function initPong(root) {
+    const W = 260, H = 170, PAD_H = 38, PAD_W = 5, BALL = 5;
+    const canvas = document.createElement('canvas');
+    canvas.className = 'game-canvas';
+    canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext('2d');
+    const t = THEMES[theme] || THEMES.dark;
+    const status = document.createElement('div');
+    status.className = 'gpa-sub';
+    status.style.cssText = 'text-align:center;margin-bottom:6px;';
+    const speedOpt = getGameOpt('pong', 'speed', 'normal');
+    const SPEEDS = { slow: 2.2, normal: 3.2, fast: 4.4 };
+    let py = H / 2 - PAD_H / 2, ay = py, bx = W / 2, by = H / 2, vx = SPEEDS[speedOpt] || 3.2, vy = 1.8;
+    let you = 0, cpu = 0, raf = null, over = false, paused = false;
+
+    function reset(dir) {
+      bx = W / 2; by = H / 2;
+      const s = SPEEDS[getGameOpt('pong', 'speed', 'normal')] || 3.2;
+      vx = s * (dir || 1); vy = (Math.random() * 2 - 1) * s * 0.6;
+    }
+    function draw() {
+      ctx.fillStyle = t.bg; ctx.fillRect(0, 0, W, H);
+      ctx.strokeStyle = t.border; ctx.setLineDash([4, 6]);
+      ctx.beginPath(); ctx.moveTo(W / 2, 0); ctx.lineTo(W / 2, H); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = t.accent; ctx.fillRect(6, py, PAD_W, PAD_H);
+      ctx.fillStyle = t.sub; ctx.fillRect(W - 6 - PAD_W, ay, PAD_W, PAD_H);
+      ctx.fillStyle = t.text; ctx.fillRect(bx - BALL / 2, by - BALL / 2, BALL, BALL);
+      ctx.font = '12px monospace'; ctx.fillStyle = t.sub;
+      ctx.fillText(String(you), W / 2 - 22, 14); ctx.fillText(String(cpu), W / 2 + 14, 14);
+    }
+    function step() {
+      if (!paused && !over) {
+        bx += vx; by += vy;
+        if (by < BALL / 2 || by > H - BALL / 2) vy = -vy;
+        // player paddle
+        if (bx - BALL / 2 < 6 + PAD_W && bx > 6 && by > py && by < py + PAD_H && vx < 0) {
+          vx = -vx; vy += ((by - (py + PAD_H / 2)) / PAD_H) * 2;
+        }
+        // cpu paddle
+        if (bx + BALL / 2 > W - 6 - PAD_W && bx < W - 6 && by > ay && by < ay + PAD_H && vx > 0) {
+          vx = -vx; vy += ((by - (ay + PAD_H / 2)) / PAD_H) * 2;
+        }
+        // cpu tracks the ball with a deliberate lag so it is beatable
+        const target = by - PAD_H / 2;
+        ay += Math.max(-2.6, Math.min(2.6, (target - ay) * 0.09));
+        ay = Math.max(0, Math.min(H - PAD_H, ay));
+        if (bx < 0) { cpu++; reset(1); }
+        if (bx > W) { you++; reset(-1); }
+        if (you >= 7 || cpu >= 7) {
+          over = true;
+          status.textContent = you > cpu ? '🏆 You win the match!' : 'CPU takes it — press Restart.';
+          if (you > cpu) setBestIfHigher('pong', you * 10 + (7 - cpu));
+        } else {
+          status.textContent = `You ${you} — ${cpu} CPU · move the mouse or use ↑ ↓`;
+        }
+      }
+      draw();
+      raf = requestAnimationFrame(step);
+    }
+    const onMove = (e) => {
+      const r = canvas.getBoundingClientRect();
+      const scale = H / r.height;
+      py = Math.max(0, Math.min(H - PAD_H, (e.clientY - r.top) * scale - PAD_H / 2));
+    };
+    canvas.addEventListener('mousemove', onMove);
+    const onKey = (e) => {
+      if (e.key === 'ArrowUp') { py = Math.max(0, py - 14); e.preventDefault(); }
+      if (e.key === 'ArrowDown') { py = Math.min(H - PAD_H, py + 14); e.preventDefault(); }
+    };
+    onWin('keydown', onKey);
+    root.appendChild(status); root.appendChild(canvas);
+    reset(Math.random() > 0.5 ? 1 : -1);
+    raf = requestAnimationFrame(step);
+    return {
+      cleanup: () => { if (raf) cancelAnimationFrame(raf); window.removeEventListener('keydown', onKey); },
+      pause: () => { paused = true; }, resume: () => { paused = false; },
+      stats: () => [{ label: 'You', value: you }, { label: 'CPU', value: cpu }],
+      options: () => [{
+        key: 'speed', label: 'Ball speed', value: getGameOpt('pong', 'speed', 'normal'), restart: true,
+        choices: [{ value: 'slow', label: 'Slow' }, { value: 'normal', label: 'Normal' }, { value: 'fast', label: 'Fast' }]
+      }]
+    };
+  }
+
+  // ---- Lights Out ----
+  function initLightsOut(root) {
+    const N = 5;
+    let grid = [], moves = 0, won = false;
+    const status = document.createElement('div');
+    status.className = 'gpa-sub';
+    status.style.cssText = 'text-align:center;margin-bottom:6px;';
+    const board = document.createElement('div');
+    board.style.cssText = `display:grid;grid-template-columns:repeat(${N},1fr);gap:4px;width:190px;`;
+    const t = THEMES[theme] || THEMES.dark;
+
+    function toggle(g, r, c) { if (r >= 0 && r < N && c >= 0 && c < N) g[r][c] = !g[r][c]; }
+    function scramble() {
+      grid = Array.from({ length: N }, () => Array(N).fill(false));
+      // Random *moves* rather than random lights, so it's always solvable.
+      for (let i = 0; i < 12; i++) {
+        const r = Math.floor(Math.random() * N), c = Math.floor(Math.random() * N);
+        toggle(grid, r, c); toggle(grid, r - 1, c); toggle(grid, r + 1, c); toggle(grid, r, c - 1); toggle(grid, r, c + 1);
+      }
+      moves = 0; won = false;
+    }
+    function render() {
+      board.innerHTML = '';
+      grid.forEach((row, r) => row.forEach((on, c) => {
+        const b = document.createElement('button');
+        b.style.cssText = `aspect-ratio:1;border-radius:6px;cursor:pointer;border:1px solid ${on ? t.accent : t.border};`
+          + `background:${on ? t.accent : t.field};box-shadow:${on ? '0 0 10px ' + t.accent + '88' : 'none'};`;
+        b.addEventListener('click', () => {
+          if (won) return;
+          toggle(grid, r, c); toggle(grid, r - 1, c); toggle(grid, r + 1, c); toggle(grid, r, c - 1); toggle(grid, r, c + 1);
+          moves++;
+          if (grid.every((rw) => rw.every((x) => !x))) {
+            won = true;
+            setBestIfHigher('lightsout', Math.max(0, 100 - moves));
+            status.textContent = `💡 All out in ${moves} moves!`;
+          } else status.textContent = `Turn every light off — ${moves} moves`;
+          render();
+        });
+        board.appendChild(b);
+      }));
+    }
+    scramble();
+    status.textContent = 'Turn every light off — clicking flips a cross';
+    render();
+    root.appendChild(status); root.appendChild(board);
+    return {
+      stats: () => [{ label: 'Moves', value: moves }, { label: 'Lights on', value: grid.flat().filter(Boolean).length }],
+      cleanup: () => {}
+    };
+  }
+
+  // ---- 15-Puzzle ----
+  function initFifteen(root) {
+    const N = 4;
+    let tiles = [], moves = 0, won = false;
+    const t = THEMES[theme] || THEMES.dark;
+    const status = document.createElement('div');
+    status.className = 'gpa-sub';
+    status.style.cssText = 'text-align:center;margin-bottom:6px;';
+    const board = document.createElement('div');
+    board.style.cssText = `display:grid;grid-template-columns:repeat(${N},1fr);gap:4px;width:200px;`;
+
+    const solved = () => tiles.every((v, i) => (i === N * N - 1 ? v === 0 : v === i + 1));
+    function scramble() {
+      tiles = [...Array(N * N - 1).keys()].map((i) => i + 1).concat(0);
+      // Shuffle by legal moves so the board is always solvable.
+      let blank = N * N - 1;
+      for (let i = 0; i < 300; i++) {
+        const opts = [];
+        const r = Math.floor(blank / N), c = blank % N;
+        if (r > 0) opts.push(blank - N);
+        if (r < N - 1) opts.push(blank + N);
+        if (c > 0) opts.push(blank - 1);
+        if (c < N - 1) opts.push(blank + 1);
+        const pick = opts[Math.floor(Math.random() * opts.length)];
+        tiles[blank] = tiles[pick]; tiles[pick] = 0; blank = pick;
+      }
+      moves = 0; won = false;
+    }
+    function render() {
+      board.innerHTML = '';
+      tiles.forEach((v, i) => {
+        const cell = document.createElement('button');
+        cell.textContent = v || '';
+        cell.style.cssText = `aspect-ratio:1;font:700 16px monospace;border-radius:6px;cursor:${v ? 'pointer' : 'default'};`
+          + `border:1px solid ${v ? t.accent + '70' : 'transparent'};background:${v ? t.field : 'transparent'};color:${t.text};`;
+        if (v) cell.addEventListener('click', () => move(i));
+        board.appendChild(cell);
+      });
+    }
+    function move(i) {
+      if (won) return;
+      const blank = tiles.indexOf(0);
+      const r = Math.floor(i / N), c = i % N, br = Math.floor(blank / N), bc = blank % N;
+      if (Math.abs(r - br) + Math.abs(c - bc) !== 1) return;
+      tiles[blank] = tiles[i]; tiles[i] = 0; moves++;
+      if (solved()) { won = true; setBestIfHigher('fifteen', Math.max(0, 500 - moves)); status.textContent = `🎉 Solved in ${moves} moves!`; }
+      else status.textContent = `Get 1–15 in order — ${moves} moves`;
+      render();
+    }
+    scramble();
+    status.textContent = 'Get 1–15 in order — click a tile beside the gap';
+    render();
+    root.appendChild(status); root.appendChild(board);
+    return { stats: () => [{ label: 'Moves', value: moves }, { label: 'Solved', value: won ? 'Yes' : 'No' }], cleanup: () => {} };
+  }
+
+  // ---- Tower of Hanoi ----
+  function initHanoi(root) {
+    const t = THEMES[theme] || THEMES.dark;
+    let discCount = parseInt(getGameOpt('hanoi', 'discs', '4'), 10) || 4;
+    let pegs = [[], [], []], sel = null, moves = 0, won = false;
+    const status = document.createElement('div');
+    status.className = 'gpa-sub';
+    status.style.cssText = 'text-align:center;margin-bottom:6px;';
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'display:flex;gap:8px;justify-content:center;align-items:flex-end;height:130px;';
+
+    function reset() {
+      discCount = parseInt(getGameOpt('hanoi', 'discs', '4'), 10) || 4;
+      pegs = [[...Array(discCount).keys()].map((i) => discCount - i), [], []];
+      sel = null; moves = 0; won = false;
+    }
+    function render() {
+      wrap.innerHTML = '';
+      pegs.forEach((peg, pi) => {
+        const col = document.createElement('div');
+        col.style.cssText = `flex:1;display:flex;flex-direction:column-reverse;align-items:center;gap:3px;height:100%;`
+          + `border-bottom:3px solid ${t.accent};padding-bottom:2px;cursor:pointer;`
+          + (sel === pi ? `background:${t.accent}18;` : '');
+        peg.forEach((d) => {
+          const disc = document.createElement('div');
+          const w = 18 + (d / discCount) * 52;
+          disc.style.cssText = `width:${w}px;height:12px;border-radius:6px;background:${t.accent};opacity:${0.45 + (d / discCount) * 0.55};`;
+          col.appendChild(disc);
+        });
+        col.addEventListener('click', () => click(pi));
+        wrap.appendChild(col);
+      });
+    }
+    function click(pi) {
+      if (won) return;
+      if (sel === null) { if (pegs[pi].length) sel = pi; }
+      else if (sel === pi) sel = null;
+      else {
+        const from = pegs[sel], to = pegs[pi];
+        const d = from[from.length - 1];
+        if (!to.length || to[to.length - 1] > d) { to.push(from.pop()); moves++; }
+        sel = null;
+      }
+      const min = Math.pow(2, discCount) - 1;
+      if (pegs[2].length === discCount) {
+        won = true;
+        setBestIfHigher('hanoi', Math.max(0, 1000 - moves));
+        status.textContent = `🏗 Done in ${moves} moves (perfect is ${min})`;
+      } else status.textContent = `Move the stack to the right peg — ${moves} moves (best possible ${min})`;
+      render();
+    }
+    reset();
+    status.textContent = 'Move the stack to the right peg — click a peg to pick up, another to drop';
+    render();
+    root.appendChild(status); root.appendChild(wrap);
+    return {
+      stats: () => [{ label: 'Moves', value: moves }, { label: 'Perfect', value: Math.pow(2, discCount) - 1 }],
+      options: () => [{
+        key: 'discs', label: 'Discs', value: String(discCount), restart: true,
+        choices: [{ value: '3', label: '3' }, { value: '4', label: '4' }, { value: '5', label: '5' }, { value: '6', label: '6' }]
+      }],
+      cleanup: () => {}
+    };
+  }
+
+  // ---- Mastermind ----
+  function initMastermind(root) {
+    const COLORS = ['#e5453a', '#4da3ff', '#22c55e', '#eab308', '#8b5cf6', '#ec4899'];
+    const LEN = 4, MAX = 10;
+    const t = THEMES[theme] || THEMES.dark;
+    let secret = [], guess = [], rows = [], over = false;
+    const status = document.createElement('div');
+    status.className = 'gpa-sub';
+    status.style.cssText = 'text-align:center;margin-bottom:6px;';
+    const history = document.createElement('div');
+    history.style.cssText = 'display:flex;flex-direction:column;gap:3px;margin-bottom:8px;max-height:140px;overflow-y:auto;';
+    const picker = document.createElement('div');
+    picker.style.cssText = 'display:flex;gap:5px;justify-content:center;flex-wrap:wrap;';
+    const current = document.createElement('div');
+    current.style.cssText = 'display:flex;gap:4px;justify-content:center;margin:6px 0;';
+
+    const dot = (c, size) => {
+      const d = document.createElement('span');
+      d.style.cssText = `width:${size}px;height:${size}px;border-radius:50%;display:inline-block;background:${c || 'transparent'};border:1px solid ${c ? c : t.border};`;
+      return d;
+    };
+    function score(g) {
+      let exact = 0, close = 0;
+      const s = [...secret], gg = [...g];
+      for (let i = 0; i < LEN; i++) if (gg[i] === s[i]) { exact++; s[i] = gg[i] = null; }
+      for (let i = 0; i < LEN; i++) {
+        if (gg[i] === null) continue;
+        const j = s.indexOf(gg[i]);
+        if (j > -1) { close++; s[j] = null; }
+      }
+      return { exact, close };
+    }
+    function renderCurrent() {
+      current.innerHTML = '';
+      for (let i = 0; i < LEN; i++) current.appendChild(dot(guess[i], 16));
+    }
+    function submit() {
+      if (over || guess.length < LEN) return;
+      const sc = score(guess);
+      rows.push({ g: [...guess], ...sc });
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;gap:4px;align-items:center;justify-content:center;';
+      guess.forEach((c) => row.appendChild(dot(c, 13)));
+      const info = document.createElement('span');
+      info.style.cssText = `font:10px monospace;color:${t.sub};margin-left:6px;`;
+      info.textContent = `${sc.exact}● ${sc.close}○`;
+      row.appendChild(info);
+      history.appendChild(row);
+      history.scrollTop = history.scrollHeight;
+      guess = []; renderCurrent();
+      if (sc.exact === LEN) {
+        over = true;
+        setBestIfHigher('mastermind', Math.max(0, (MAX - rows.length + 1) * 10));
+        status.textContent = `🎯 Cracked it in ${rows.length} guesses!`;
+      } else if (rows.length >= MAX) {
+        over = true;
+        const reveal = document.createElement('div');
+        reveal.style.cssText = 'display:flex;gap:4px;justify-content:center;margin-top:4px;';
+        secret.forEach((c) => reveal.appendChild(dot(c, 13)));
+        history.appendChild(reveal);
+        status.textContent = 'Out of guesses — the code is shown above.';
+      } else status.textContent = `${MAX - rows.length} guesses left · ● right spot, ○ right colour`;
+    }
+    secret = Array.from({ length: LEN }, () => COLORS[Math.floor(Math.random() * COLORS.length)]);
+    COLORS.forEach((c) => {
+      const b = document.createElement('button');
+      b.style.cssText = `width:22px;height:22px;border-radius:50%;background:${c};border:1px solid ${t.border};cursor:pointer;`;
+      b.addEventListener('click', () => { if (!over && guess.length < LEN) { guess.push(c); renderCurrent(); if (guess.length === LEN) submit(); } });
+      picker.appendChild(b);
+    });
+    const undo = document.createElement('button');
+    undo.className = 'gpa-btn';
+    undo.textContent = '⌫';
+    undo.addEventListener('click', () => { if (!over) { guess.pop(); renderCurrent(); } });
+    picker.appendChild(undo);
+    status.textContent = `Crack the 4-colour code · ● right spot, ○ right colour`;
+    renderCurrent();
+    root.appendChild(status); root.appendChild(history); root.appendChild(current); root.appendChild(picker);
+    return { stats: () => [{ label: 'Guesses', value: rows.length }, { label: 'Left', value: Math.max(0, MAX - rows.length) }], cleanup: () => {} };
+  }
+
+  // ---- Blackjack ----
+  function initBlackjack(root) {
+    const t = THEMES[theme] || THEMES.dark;
+    let deck = [], you = [], dealer = [], done = false, wins = 0, losses = 0, pushes = 0;
+    const status = document.createElement('div');
+    status.className = 'gpa-sub';
+    status.style.cssText = 'text-align:center;margin-bottom:6px;min-height:16px;';
+    const table = document.createElement('div');
+    table.style.cssText = 'display:flex;flex-direction:column;gap:8px;align-items:center;margin-bottom:8px;';
+    const controls = document.createElement('div');
+    controls.style.cssText = 'display:flex;gap:6px;justify-content:center;';
+    const tally = document.createElement('div');
+    tally.className = 'gpa-sub';
+    tally.style.cssText = 'text-align:center;margin-top:6px;';
+
+    function newDeck() {
+      const suits = ['♠', '♥', '♦', '♣'], ranks = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+      deck = [];
+      suits.forEach((s) => ranks.forEach((r) => deck.push({ r, s })));
+      for (let i = deck.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [deck[i], deck[j]] = [deck[j], deck[i]]; }
+    }
+    function total(hand) {
+      let sum = 0, aces = 0;
+      hand.forEach((c) => {
+        if (c.r === 'A') { aces++; sum += 11; }
+        else if (['J', 'Q', 'K'].includes(c.r)) sum += 10;
+        else sum += parseInt(c.r, 10);
+      });
+      while (sum > 21 && aces) { sum -= 10; aces--; }
+      return sum;
+    }
+    function cardEl(c, hidden) {
+      const d = document.createElement('div');
+      const red = c && (c.s === '♥' || c.s === '♦');
+      d.textContent = hidden ? '🂠' : c.r + c.s;
+      d.style.cssText = `min-width:30px;padding:6px 5px;border-radius:5px;text-align:center;font:700 12px monospace;`
+        + `background:${hidden ? t.field : '#f6f6f8'};color:${hidden ? t.sub : (red ? '#d33' : '#111')};border:1px solid ${t.border};`;
+      return d;
+    }
+    function render() {
+      table.innerHTML = '';
+      const mk = (label, hand, hideSecond) => {
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;gap:5px;align-items:center;justify-content:center;flex-wrap:wrap;';
+        const lab = document.createElement('span');
+        lab.style.cssText = `font:10px monospace;color:${t.sub};width:52px;`;
+        lab.textContent = label + (hideSecond ? '' : ' ' + total(hand));
+        row.appendChild(lab);
+        hand.forEach((c, i) => row.appendChild(cardEl(c, hideSecond && i === 1)));
+        table.appendChild(row);
+      };
+      mk('Dealer', dealer, !done);
+      mk('You', you, false);
+    }
+    function finish() {
+      done = true;
+      while (total(dealer) < 17) dealer.push(deck.pop());
+      const y = total(you), dtot = total(dealer);
+      let msg;
+      if (y > 21) { msg = 'Bust — dealer wins.'; losses++; }
+      else if (dtot > 21) { msg = '🎉 Dealer busts — you win!'; wins++; }
+      else if (y > dtot) { msg = '🎉 You win!'; wins++; }
+      else if (y < dtot) { msg = 'Dealer wins.'; losses++; }
+      else { msg = 'Push — nobody wins.'; pushes++; }
+      setBestIfHigher('blackjack', wins);
+      status.textContent = msg;
+      tally.textContent = `W ${wins} · L ${losses} · P ${pushes}`;
+      render();
+    }
+    function deal() {
+      if (deck.length < 12) newDeck();
+      you = [deck.pop(), deck.pop()]; dealer = [deck.pop(), deck.pop()];
+      done = false;
+      status.textContent = total(you) === 21 ? 'Blackjack! Stand to collect.' : 'Hit or stand?';
+      render();
+    }
+    const mkBtn = (label, fn) => {
+      const b = document.createElement('button');
+      b.className = 'gpa-btn';
+      b.textContent = label;
+      b.addEventListener('click', fn);
+      controls.appendChild(b);
+      return b;
+    };
+    mkBtn('Hit', () => { if (done) return; you.push(deck.pop()); if (total(you) >= 21) finish(); else render(); });
+    mkBtn('Stand', () => { if (!done) finish(); });
+    mkBtn('Deal', () => deal());
+    newDeck(); deal();
+    tally.textContent = 'W 0 · L 0 · P 0';
+    root.appendChild(status); root.appendChild(table); root.appendChild(controls); root.appendChild(tally);
+    return {
+      stats: () => [{ label: 'Wins', value: wins }, { label: 'Losses', value: losses }, { label: 'Pushes', value: pushes }],
+      cleanup: () => {}
+    };
+  }
+
+  // ---- Typing test ----
+  function initTyping(root) {
+    const SENTENCES = [
+      'the quick brown fox jumps over the lazy dog',
+      'practice makes progress not perfection',
+      'a journey of a thousand miles begins with one step',
+      'simple code is easier to fix than clever code',
+      'every expert was once a complete beginner',
+      'read the question twice before you answer it'
+    ];
+    const t = THEMES[theme] || THEMES.dark;
+    let target = '', startedAt = 0, finished = false, wpm = 0, acc = 100;
+    const status = document.createElement('div');
+    status.className = 'gpa-sub';
+    status.style.cssText = 'text-align:center;margin-bottom:6px;';
+    const display = document.createElement('div');
+    display.style.cssText = `font:13px/1.7 monospace;padding:8px;border-radius:6px;background:${t.field};border:1px solid ${t.border};margin-bottom:8px;min-height:52px;`;
+    const input = document.createElement('input');
+    input.className = 'gpa-input';
+    input.placeholder = 'Start typing…';
+    input.autocomplete = 'off';
+
+    function render() {
+      display.innerHTML = '';
+      const typed = input.value;
+      let wrong = 0;
+      target.split('').forEach((ch, i) => {
+        const s = document.createElement('span');
+        s.textContent = ch;
+        if (i < typed.length) {
+          const good = typed[i] === ch;
+          if (!good) wrong++;
+          s.style.color = good ? '#22c55e' : '#ff6b6b';
+          if (!good) s.style.background = '#ff6b6b22';
+        } else s.style.color = t.sub;
+        display.appendChild(s);
+      });
+      acc = typed.length ? Math.max(0, Math.round(((typed.length - wrong) / typed.length) * 100)) : 100;
+      const secs = startedAt ? (Date.now() - startedAt) / 1000 : 0;
+      wpm = secs > 0 ? Math.round((typed.length / 5) / (secs / 60)) : 0;
+      if (!finished) status.textContent = `${wpm} wpm · ${acc}% accurate`;
+    }
+    function reset() {
+      target = SENTENCES[Math.floor(Math.random() * SENTENCES.length)];
+      input.value = ''; startedAt = 0; finished = false;
+      status.textContent = 'Type the sentence as fast as you can';
+      render(); input.focus();
+    }
+    input.addEventListener('input', () => {
+      if (!startedAt) startedAt = Date.now();
+      render();
+      if (input.value === target && !finished) {
+        finished = true;
+        setBestIfHigher('typing', wpm);
+        status.textContent = `✅ ${wpm} wpm at ${acc}% accuracy — press Restart for a new one`;
+      }
+    });
+    reset();
+    root.appendChild(status); root.appendChild(display); root.appendChild(input);
+    setTimeout(() => input.focus(), 50);
+    return { stats: () => [{ label: 'WPM', value: wpm }, { label: 'Accuracy', value: acc + '%' }], cleanup: () => {} };
+  }
+
+  // ---- Math sprint ----
+  function initMathSprint(root) {
+    const t = THEMES[theme] || THEMES.dark;
+    const level = getGameOpt('mathsprint', 'level', 'normal');
+    let score = 0, streak = 0, best = 0, left = 60, a = 0, b = 0, op = '+', timer = null, over = false;
+    const status = document.createElement('div');
+    status.className = 'gpa-sub';
+    status.style.cssText = 'text-align:center;margin-bottom:6px;';
+    const q = document.createElement('div');
+    q.style.cssText = `font:700 26px monospace;text-align:center;color:${t.accent};margin:10px 0;`;
+    const input = document.createElement('input');
+    input.className = 'gpa-input';
+    input.inputMode = 'numeric';
+    input.placeholder = 'Answer + Enter';
+    input.autocomplete = 'off';
+
+    function range() {
+      const lv = getGameOpt('mathsprint', 'level', 'normal');
+      return lv === 'easy' ? 10 : lv === 'hard' ? 50 : 20;
+    }
+    function next() {
+      const R = range();
+      const ops = getGameOpt('mathsprint', 'level', 'normal') === 'easy' ? ['+', '-'] : ['+', '-', '×'];
+      op = ops[Math.floor(Math.random() * ops.length)];
+      a = Math.floor(Math.random() * R) + 1;
+      b = Math.floor(Math.random() * (op === '×' ? Math.min(12, R) : R)) + 1;
+      if (op === '-' && b > a) [a, b] = [b, a];
+      q.textContent = `${a} ${op} ${b} = ?`;
+    }
+    const answer = () => (op === '+' ? a + b : op === '-' ? a - b : a * b);
+    input.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' || over) return;
+      const v = parseInt(input.value, 10);
+      input.value = '';
+      if (v === answer()) { score++; streak++; best = Math.max(best, streak); status.textContent = `✅ correct · streak ${streak}`; }
+      else { streak = 0; status.textContent = `✗ it was ${answer()}`; }
+      next();
+    });
+    timer = setInterval(() => {
+      left--;
+      if (left <= 0) {
+        over = true;
+        clearInterval(timer); timer = null;
+        setBestIfHigher('mathsprint', score);
+        q.textContent = `${score} correct`;
+        status.textContent = `⏱ Time! ${score} correct, best streak ${best}. Press Restart.`;
+        input.disabled = true;
+      } else if (!over) status.textContent = `${left}s left · score ${score} · streak ${streak}`;
+    }, 1000);
+    next();
+    status.textContent = '60 seconds — how many can you get?';
+    root.appendChild(status); root.appendChild(q); root.appendChild(input);
+    setTimeout(() => input.focus(), 50);
+    return {
+      cleanup: () => { if (timer) clearInterval(timer); },
+      pause: () => { if (timer) { clearInterval(timer); timer = null; } },
+      stats: () => [{ label: 'Score', value: score }, { label: 'Best streak', value: best }, { label: 'Time left', value: left + 's' }],
+      options: () => [{
+        key: 'level', label: 'Difficulty', value: getGameOpt('mathsprint', 'level', 'normal'), restart: true,
+        choices: [{ value: 'easy', label: 'Easy' }, { value: 'normal', label: 'Normal' }, { value: 'hard', label: 'Hard' }]
+      }]
+    };
+  }
+
+  // ---- Maze ----
+  function initMaze(root) {
+    const t = THEMES[theme] || THEMES.dark;
+    const N = parseInt(getGameOpt('maze', 'size', '11'), 10) || 11;
+    const cell = Math.max(10, Math.floor(200 / N));
+    const canvas = document.createElement('canvas');
+    canvas.className = 'game-canvas';
+    canvas.width = N * cell; canvas.height = N * cell;
+    const ctx = canvas.getContext('2d');
+    const status = document.createElement('div');
+    status.className = 'gpa-sub';
+    status.style.cssText = 'text-align:center;margin-bottom:6px;';
+    let grid = [], px = 1, py = 1, steps = 0, won = false;
+
+    function carve() {
+      // Recursive-backtracker on odd cells; 1 = wall, 0 = open.
+      grid = Array.from({ length: N }, () => Array(N).fill(1));
+      const stack = [[1, 1]];
+      grid[1][1] = 0;
+      while (stack.length) {
+        const [r, c] = stack[stack.length - 1];
+        const dirs = [[-2, 0], [2, 0], [0, -2], [0, 2]].sort(() => Math.random() - 0.5);
+        let moved = false;
+        for (const [dr, dc] of dirs) {
+          const nr = r + dr, nc = c + dc;
+          if (nr > 0 && nr < N - 1 && nc > 0 && nc < N - 1 && grid[nr][nc] === 1) {
+            grid[r + dr / 2][c + dc / 2] = 0; grid[nr][nc] = 0;
+            stack.push([nr, nc]); moved = true; break;
+          }
+        }
+        if (!moved) stack.pop();
+      }
+      grid[N - 2][N - 2] = 0;
+      px = 1; py = 1; steps = 0; won = false;
+    }
+    function draw() {
+      ctx.fillStyle = t.bg; ctx.fillRect(0, 0, canvas.width, canvas.height);
+      for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+        if (grid[r][c] === 1) { ctx.fillStyle = t.border; ctx.fillRect(c * cell, r * cell, cell, cell); }
+      }
+      ctx.fillStyle = '#22c55e';
+      ctx.fillRect((N - 2) * cell + 2, (N - 2) * cell + 2, cell - 4, cell - 4);
+      ctx.fillStyle = t.accent;
+      ctx.beginPath();
+      ctx.arc(px * cell + cell / 2, py * cell + cell / 2, cell / 2 - 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    function move(dx, dy) {
+      if (won) return;
+      const nx = px + dx, ny = py + dy;
+      if (nx < 0 || ny < 0 || nx >= N || ny >= N || grid[ny][nx] === 1) return;
+      px = nx; py = ny; steps++;
+      if (px === N - 2 && py === N - 2) {
+        won = true;
+        setBestIfHigher('maze', Math.max(0, 1000 - steps));
+        status.textContent = `🏁 Out in ${steps} steps!`;
+      } else status.textContent = `Reach the green square — ${steps} steps`;
+      draw();
+    }
+    const onKey = (e) => {
+      const k = e.key;
+      if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(k)) return;
+      e.preventDefault();
+      if (k === 'ArrowUp') move(0, -1);
+      if (k === 'ArrowDown') move(0, 1);
+      if (k === 'ArrowLeft') move(-1, 0);
+      if (k === 'ArrowRight') move(1, 0);
+    };
+    onWin('keydown', onKey);
+    carve(); draw();
+    status.textContent = 'Reach the green square — arrow keys';
+    root.appendChild(status); root.appendChild(canvas);
+    return {
+      cleanup: () => window.removeEventListener('keydown', onKey),
+      stats: () => [{ label: 'Steps', value: steps }, { label: 'Escaped', value: won ? 'Yes' : 'No' }],
+      options: () => [{
+        key: 'size', label: 'Maze size', value: String(N), restart: true,
+        choices: [{ value: '9', label: 'Small' }, { value: '11', label: 'Medium' }, { value: '15', label: 'Large' }, { value: '21', label: 'Huge' }]
+      }]
+    };
+  }
+
+  // ---- Space Invaders ----
+  function initInvaders(root) {
+    const W = 220, H = 190;
+    const t = THEMES[theme] || THEMES.dark;
+    const canvas = document.createElement('canvas');
+    canvas.className = 'game-canvas';
+    canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext('2d');
+    const status = document.createElement('div');
+    status.className = 'gpa-sub';
+    status.style.cssText = 'text-align:center;margin-bottom:6px;';
+    let ship = W / 2, bullets = [], bombs = [], aliens = [], dir = 1, score = 0, lives = 3;
+    let raf = null, paused = false, over = false, tick = 0, wave = 1;
+    const keys = {};
+
+    function spawnWave() {
+      aliens = [];
+      const cols = 7, rows = 3;
+      for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+        aliens.push({ x: 18 + c * 27, y: 22 + r * 20, alive: true });
+      }
+      dir = 1;
+    }
+    function draw() {
+      ctx.fillStyle = t.bg; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = t.accent;
+      aliens.forEach((a) => { if (a.alive) ctx.fillRect(a.x - 7, a.y - 5, 14, 10); });
+      ctx.fillStyle = t.text;
+      ctx.fillRect(ship - 10, H - 14, 20, 6);
+      ctx.fillRect(ship - 2, H - 19, 4, 5);
+      ctx.fillStyle = '#22c55e';
+      bullets.forEach((b) => ctx.fillRect(b.x - 1, b.y, 2, 6));
+      ctx.fillStyle = '#ff6b6b';
+      bombs.forEach((b) => ctx.fillRect(b.x - 1, b.y, 2, 6));
+      ctx.font = '10px monospace'; ctx.fillStyle = t.sub;
+      ctx.fillText('Score ' + score, 4, 11);
+      ctx.fillText('♥'.repeat(Math.max(0, lives)), W - 34, 11);
+    }
+    function step() {
+      if (!paused && !over) {
+        tick++;
+        if (keys.ArrowLeft) ship = Math.max(12, ship - 3);
+        if (keys.ArrowRight) ship = Math.min(W - 12, ship + 3);
+        bullets = bullets.filter((b) => (b.y -= 5) > -6);
+        bombs = bombs.filter((b) => (b.y += 2.2) < H);
+        // march the formation
+        const speed = 8 + wave * 2;
+        if (tick % Math.max(6, 26 - wave * 3) === 0) {
+          const live = aliens.filter((a) => a.alive);
+          const hitEdge = live.some((a) => (dir > 0 && a.x > W - 16) || (dir < 0 && a.x < 16));
+          if (hitEdge) { dir = -dir; live.forEach((a) => { a.y += 9; }); }
+          else live.forEach((a) => { a.x += dir * 5; });
+          if (live.some((a) => a.y > H - 26)) { over = true; status.textContent = 'They landed — game over. Press Restart.'; }
+          // occasional return fire
+          if (live.length && Math.random() < 0.55) {
+            const shooter = live[Math.floor(Math.random() * live.length)];
+            bombs.push({ x: shooter.x, y: shooter.y + 6 });
+          }
+        }
+        bullets.forEach((b) => aliens.forEach((a) => {
+          if (a.alive && Math.abs(a.x - b.x) < 9 && Math.abs(a.y - b.y) < 8) { a.alive = false; b.y = -99; score += 10; }
+        }));
+        bombs.forEach((b) => {
+          if (b.y > H - 18 && Math.abs(b.x - ship) < 12) { b.y = H + 99; lives--; if (lives <= 0) { over = true; setBestIfHigher('invaders', score); status.textContent = `Game over — ${score} points. Press Restart.`; } }
+        });
+        if (aliens.every((a) => !a.alive)) { wave++; score += 50; spawnWave(); status.textContent = `Wave ${wave}! · ← → move, space to fire`; }
+      }
+      draw();
+      raf = requestAnimationFrame(step);
+    }
+    const onKey = (e) => {
+      if (['ArrowLeft', 'ArrowRight', ' '].includes(e.key)) e.preventDefault();
+      keys[e.key] = true;
+      if (e.key === ' ' && !over && !paused && bullets.length < 3) bullets.push({ x: ship, y: H - 20 });
+    };
+    const onUp = (e) => { keys[e.key] = false; };
+    onWin('keydown', onKey); onWin('keyup', onUp);
+    spawnWave();
+    status.textContent = '← → move · space to fire';
+    root.appendChild(status); root.appendChild(canvas);
+    raf = requestAnimationFrame(step);
+    return {
+      cleanup: () => { if (raf) cancelAnimationFrame(raf); window.removeEventListener('keydown', onKey); window.removeEventListener('keyup', onUp); },
+      pause: () => { paused = true; }, resume: () => { paused = false; },
+      stats: () => [{ label: 'Score', value: score }, { label: 'Wave', value: wave }, { label: 'Lives', value: Math.max(0, lives) }]
+    };
+  }
+
   const GAME_LOADERS = {
     ttt: initTTT, rps: initRPS, memory: initMemory, snake: initSnake,
     '2048': init2048, whack: initWhack, guess: initGuess, hangman: initHangman,
     wordle: initWordle, connect4: initConnect4, minesweeper: initMinesweeper,
     simon: initSimon, breakout: initBreakout, flappy: initFlappy,
     scramble: initScramble, reaction: initReaction,
-    tetris: initTetris, checkers: initCheckers, sudoku: initSudoku
+    tetris: initTetris, checkers: initCheckers, sudoku: initSudoku,
+    pong: initPong, lightsout: initLightsOut, fifteen: initFifteen,
+    hanoi: initHanoi, mastermind: initMastermind, blackjack: initBlackjack,
+    typing: initTyping, mathsprint: initMathSprint, maze: initMaze,
+    invaders: initInvaders
   };
 
   const GAME_LABELS = {
@@ -7585,7 +8568,10 @@
     '2048': '2048', whack: 'Whack-a-Mole', guess: 'Guess the Number', hangman: 'Hangman',
     wordle: 'Wordle', connect4: 'Connect 4', minesweeper: 'Minesweeper', simon: 'Simon',
     breakout: 'Breakout', flappy: 'Flappy', scramble: 'Word Scramble', reaction: 'Reaction Test',
-    tetris: 'Tetris', checkers: 'Checkers', sudoku: 'Sudoku'
+    tetris: 'Tetris', checkers: 'Checkers', sudoku: 'Sudoku',
+    pong: 'Pong', lightsout: 'Lights Out', fifteen: '15-Puzzle', hanoi: 'Tower of Hanoi',
+    mastermind: 'Mastermind', blackjack: 'Blackjack', typing: 'Typing Test',
+    mathsprint: 'Math Sprint', maze: 'Maze', invaders: 'Space Invaders'
   };
 
   const gameStage = panel.querySelector('#gpa-game-stage');
@@ -8022,6 +9008,7 @@
   // lever is the worker refusing to proxy AI for a blocked user (see worker).
   let statusTimer = null;
   let modBaselineKick = null;   // kick counter we've already acted on this load
+  let reloadBaseline = null;    // owner reload counter we've already acted on
   let modOverlayEl = null;
 
   function startStatusPolling() {
@@ -8050,9 +9037,120 @@
         return;
       }
     }
+    // Owner broadcast, remote reload and feature flags ride along on the same
+    // status payload, so they land within one poll like moderation does.
+    if (typeof s.broadcast === 'string') showBroadcast(s.broadcast);
+    if (s.announcement) showAnnouncement(s.announcement);
+    if (s.features && typeof s.features === 'object') applyFeatureFlags(s.features);
+    if (typeof s.reloadVersion === 'number') {
+      if (reloadBaseline === null) reloadBaseline = s.reloadVersion;
+      else if (s.reloadVersion > reloadBaseline) {
+        reloadBaseline = s.reloadVersion;
+        showBroadcast('Updating to the latest version…');
+        reloadInterface(panel.querySelector('#gpa-reload'));
+        return;
+      }
+    }
     if (s.state === 'blocked') showModOverlay('blocked', s.reason);
     else if (s.state === 'locked') showModOverlay('locked', s.reason);
     else hideModOverlay();
+  }
+
+  // ---- Owner broadcast banner ----
+  let broadcastText = null;   // null = never set, '' = explicitly cleared
+  let broadcastEl = null;
+  function showBroadcast(text) {
+    if (text === broadcastText) return;   // don't rebuild on every poll
+    broadcastText = text;
+    if (!text) { if (broadcastEl) { broadcastEl.remove(); broadcastEl = null; } return; }
+    const t = THEMES[theme] || THEMES.dark;
+    if (!broadcastEl) {
+      broadcastEl = document.createElement('div');
+      broadcastEl.className = 'gpa-broadcast';
+      panel.insertBefore(broadcastEl, panel.firstChild ? panel.firstChild.nextSibling : null);
+    }
+    broadcastEl.innerHTML = '';
+    broadcastEl.style.cssText = `padding:7px 10px;margin:0;font:11px/1.45 ui-monospace,monospace;`
+      + `background:${t.accent}1f;border-bottom:1px solid ${t.accent}66;color:${t.text};display:flex;gap:8px;align-items:flex-start;`;
+    const icon = document.createElement('span'); icon.textContent = '📢';
+    const msg = document.createElement('span'); msg.style.flex = '1'; msg.textContent = text;
+    const x = document.createElement('span');
+    x.textContent = '✕';
+    x.style.cssText = `cursor:pointer;opacity:0.7;`;
+    x.addEventListener('click', () => { if (broadcastEl) { broadcastEl.remove(); broadcastEl = null; } });
+    broadcastEl.appendChild(icon); broadcastEl.appendChild(msg); broadcastEl.appendChild(x);
+  }
+
+  // ---- Announcement modal ----
+  // Distinct from the broadcast banner: this one is a modal the user has to
+  // acknowledge, for things they must not miss. Each send gets a fresh id, and
+  // we remember the last id acknowledged so it shows exactly once per
+  // announcement rather than on every poll.
+  const ANN_SEEN_KEY = 'gpa_ann_seen';
+  function showAnnouncement(ann) {
+    if (!ann || !ann.id) return;
+    if (localStorage.getItem(ANN_SEEN_KEY) === ann.id) return;
+    if (panel.querySelector('.gpa-ann-backdrop')) return;   // one at a time
+    const back = document.createElement('div');
+    back.className = 'gpa-ann-backdrop';
+    const card = document.createElement('div');
+    card.className = 'gpa-ann-card';
+    const title = document.createElement('div');
+    title.className = 'gpa-ann-title';
+    title.textContent = '📣 ' + (ann.title || 'Announcement');
+    const text = document.createElement('div');
+    text.className = 'gpa-ann-text';
+    text.textContent = ann.text || '';
+    const ok = document.createElement('button');
+    ok.className = 'gpa-btn primary gpa-ann-ok';
+    ok.textContent = 'Got it';
+    ok.addEventListener('click', () => {
+      try { localStorage.setItem(ANN_SEEN_KEY, ann.id); } catch (e) { /* ignore */ }
+      back.remove();
+    });
+    card.appendChild(title); card.appendChild(text); card.appendChild(ok);
+    back.appendChild(card);
+    panel.appendChild(back);
+  }
+
+  // ---- Owner feature flags ----
+  // A flag set to false hides that section for everyone. The owner's own panel
+  // is left alone so a mistake can always be undone from the admin console.
+  let featureFlags = {};
+  function featureOn(name) { return featureFlags[name] !== false; }
+  function applyFeatureFlags(flags) {
+    if (JSON.stringify(flags) === JSON.stringify(featureFlags)) return;
+    featureFlags = flags || {};
+    ['games', 'music', 'browser', 'notes', 'study'].forEach((tab) => {
+      const on = ownerMode || featureOn(tab);
+      const item = panel.querySelector(`.gpa-dropdown-item[data-tab="${tab}"]`);
+      if (item) item.style.display = on ? '' : 'none';
+      const pane = panel.querySelector(`.gpa-pane[data-pane="${tab}"]`);
+      // If they're sitting on a tab that just got switched off, move them back
+      // to Page Insights rather than leaving a dead pane on screen.
+      if (pane && !on && pane.classList.contains('active')) {
+        pane.classList.remove('active');
+        const scan = panel.querySelector('.gpa-pane[data-pane="scan"]');
+        const scanItem = panel.querySelector('.gpa-dropdown-item[data-tab="scan"]');
+        if (scan) scan.classList.add('active');
+        panel.querySelectorAll('.gpa-dropdown-item').forEach((b) => b.classList.remove('active'));
+        if (scanItem) {
+          scanItem.classList.add('active');
+          const lbl = panel.querySelector('#gpa-dropdown-label');
+          if (lbl) lbl.textContent = scanItem.textContent;
+        }
+        if (tab === 'games') { try { stopActiveGame(); } catch (e) { /* none running */ } }
+      }
+    });
+    // Quiz/tutor can be switched off without hiding the whole tab.
+    [['quiz', '#gpa-quiz-btn'], ['tutor', '#gpa-tutor-btn']].forEach(([flag, sel]) => {
+      const btn = panel.querySelector(sel);
+      if (!btn) return;
+      const on = ownerMode || featureOn(flag);
+      btn.disabled = !on;
+      btn.style.opacity = on ? '' : '0.45';
+      btn.title = on ? '' : 'Turned off by the owner';
+    });
   }
 
   function showModOverlay(kind, reason) {
@@ -8234,7 +9332,9 @@
         const name = tab.dataset.atab;
         adminBox.querySelectorAll('.gpa-admin-pane').forEach((p) => p.classList.toggle('active', p.dataset.apane === name));
         if (name === 'usage') renderUsage();
-        if (name === 'data') renderLsEditor();
+        if (name === 'data') { renderLsEditor(); renderKeyManager(); }
+        if (name === 'diag') runDiagnostics();
+        if (name === 'control') renderRooms();
       });
     });
 
@@ -8480,6 +9580,214 @@
       if (teleAutoTimer) { clearInterval(teleAutoTimer); teleAutoTimer = null; teleAutoBtn.textContent = '▶ Auto-refresh: OFF'; teleAutoBtn.classList.remove('primary'); }
     });
 
+    // ---- Control tab: things pushed to every client ----
+    const controlMsg = panel.querySelector('#gpa-adm-control-msg');
+    function adminBase() { return (teleEndpoint.value.trim() || TELEMETRY_ENDPOINT || '').replace(/\/+$/, ''); }
+    async function postConfig(body, okMsg) {
+      const token = teleToken.value.trim();
+      const base = adminBase();
+      if (!token || !base) { controlMsg.textContent = 'Set the worker URL and admin token on the Usage tab first.'; return null; }
+      controlMsg.textContent = 'Sending…';
+      try {
+        const res = await fetch(base + '/admin/config?token=' + encodeURIComponent(token), {
+          method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify(body)
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+        controlMsg.textContent = okMsg || 'Done.';
+        return data.config || {};
+      } catch (e) {
+        controlMsg.textContent = 'Failed: ' + e.message;
+        return null;
+      }
+    }
+    const FLAGS = [
+      ['quiz', 'Quiz solver'], ['tutor', 'Tutor mode'], ['games', 'Games'],
+      ['music', 'Music'], ['browser', 'Browser'], ['notes', 'Notes'], ['study', 'Study']
+    ];
+    let knownFlags = {};
+    function renderFlags() {
+      const wrap = panel.querySelector('#gpa-adm-flags');
+      wrap.innerHTML = '';
+      FLAGS.forEach(([key, label]) => {
+        const on = knownFlags[key] !== false;
+        const b = document.createElement('button');
+        b.className = 'gpa-btn' + (on ? ' primary' : '');
+        b.style.fontSize = '10px';
+        b.textContent = (on ? '✓ ' : '✕ ') + label;
+        b.addEventListener('click', async () => {
+          const cfg = await postConfig({ features: { [key]: !on } }, `${label} ${on ? 'turned off' : 'turned back on'} for everyone.`);
+          if (cfg) { knownFlags = cfg.features || {}; renderFlags(); }
+        });
+        wrap.appendChild(b);
+      });
+    }
+    renderFlags();
+    panel.querySelector('#gpa-adm-broadcast-send').addEventListener('click', async () => {
+      const text = panel.querySelector('#gpa-adm-broadcast').value.trim();
+      if (!text) { controlMsg.textContent = 'Type a message first.'; return; }
+      await postConfig({ broadcast: text }, 'Broadcast sent — everyone sees it within ~15s.');
+    });
+    panel.querySelector('#gpa-adm-broadcast-clear').addEventListener('click', async () => {
+      panel.querySelector('#gpa-adm-broadcast').value = '';
+      await postConfig({ broadcast: '' }, 'Banner cleared.');
+    });
+    // ---- Announcement popup ----
+    panel.querySelector('#gpa-adm-ann-send').addEventListener('click', async () => {
+      const title = panel.querySelector('#gpa-adm-ann-title').value.trim() || 'Announcement';
+      const text = panel.querySelector('#gpa-adm-ann-text').value.trim();
+      if (!text) { controlMsg.textContent = 'Write the announcement first.'; return; }
+      await postConfig({ announcement: { title, text } }, 'Popup sent — everyone sees it within ~15s and has to dismiss it.');
+    });
+    panel.querySelector('#gpa-adm-ann-clear').addEventListener('click', async () => {
+      panel.querySelector('#gpa-adm-ann-text').value = '';
+      await postConfig({ announcement: null }, 'Announcement cleared.');
+    });
+
+    // ---- Private chat rooms ----
+    async function roomsApi(body) {
+      const token = teleToken.value.trim();
+      const base = adminBase();
+      if (!token || !base) { controlMsg.textContent = 'Set the worker URL and admin token on the Usage tab first.'; return null; }
+      try {
+        const res = await fetch(base + '/admin/rooms?token=' + encodeURIComponent(token), {
+          method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify(body)
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+        return data;
+      } catch (e) { controlMsg.textContent = 'Room action failed: ' + e.message; return null; }
+    }
+    async function renderRooms() {
+      const wrap = panel.querySelector('#gpa-adm-rooms');
+      const data = await roomsApi({ action: 'list' });
+      if (!data) return;
+      wrap.innerHTML = '';
+      if (!data.rooms.length) { wrap.innerHTML = '<div class="gpa-sub">No private rooms yet.</div>'; return; }
+      data.rooms.forEach((r) => {
+        const row = document.createElement('div');
+        row.className = 'gpa-admin-userrow';
+        const left = document.createElement('span');
+        left.innerHTML = `🔒 <b>${escapeHtml(r.name)}</b> <span style="opacity:0.6">${escapeHtml(r.id)}</span>`;
+        const btns = document.createElement('span');
+        btns.style.cssText = 'display:flex;gap:4px;';
+        const code = document.createElement('button');
+        code.className = 'gpa-btn'; code.style.fontSize = '9px'; code.textContent = '🔑 New code';
+        code.addEventListener('click', async () => {
+          const d = await roomsApi({ action: 'newcode', id: r.id });
+          if (!d) return;
+          try { await navigator.clipboard.writeText(d.code); } catch (e) { /* optional */ }
+          controlMsg.innerHTML = `Code for <b>${escapeHtml(r.name)}</b>: `
+            + `<span style="font-family:ui-monospace,monospace;letter-spacing:2px;color:${(THEMES[theme] || THEMES.dark).accent}">${escapeHtml(d.code)}</span>`
+            + ' — copied. Anyone with it can join; the old code no longer works.';
+        });
+        const del = document.createElement('button');
+        del.className = 'gpa-btn'; del.style.fontSize = '9px'; del.textContent = '🗑';
+        del.addEventListener('click', async () => {
+          if (!confirm(`Delete "${r.name}" and all its messages?`)) return;
+          await roomsApi({ action: 'delete', id: r.id });
+          controlMsg.textContent = `Deleted ${r.name}.`;
+          renderRooms();
+        });
+        btns.appendChild(code); btns.appendChild(del);
+        row.appendChild(left); row.appendChild(btns);
+        wrap.appendChild(row);
+      });
+    }
+    panel.querySelector('#gpa-adm-room-create').addEventListener('click', async () => {
+      const nameEl = panel.querySelector('#gpa-adm-room-name');
+      const name = nameEl.value.trim();
+      if (!name) { controlMsg.textContent = 'Give the room a name.'; return; }
+      const d = await roomsApi({ action: 'create', name });
+      if (!d) return;
+      nameEl.value = '';
+      try { await navigator.clipboard.writeText(d.code); } catch (e) { /* optional */ }
+      controlMsg.innerHTML = `Created <b>${escapeHtml(d.name)}</b> (id <code>${escapeHtml(d.id)}</code>). Code: `
+        + `<span style="font-family:ui-monospace,monospace;letter-spacing:2px;color:${(THEMES[theme] || THEMES.dark).accent}">${escapeHtml(d.code)}</span>`
+        + ' — copied. Share the id and code with whoever should be in it.';
+      renderRooms();
+    });
+
+    panel.querySelector('#gpa-adm-force-reload').addEventListener('click', async () => {
+      if (!confirm('Make every open copy re-fetch the script and restart?')) return;
+      await postConfig({ bumpReload: true }, 'Reload pushed — clients update within ~15s.');
+    });
+
+    // ---- Diagnostics tab ----
+    async function runDiagnostics() {
+      const out = panel.querySelector('#gpa-adm-diag');
+      out.innerHTML = '<div class="gpa-sub">Running…</div>';
+      const rows = [];
+      const add = (label, value, good) => rows.push({ label, value: String(value), good });
+
+      add('Page origin', location.origin, true);
+      add('Panel storage', location.hostname, true);
+      add('Online', navigator.onLine ? 'yes' : 'no (offline)', navigator.onLine);
+      add('Provider', currentProviderLabel(), true);
+      add('Base model', (admGet(ADMIN_KEYS.MODEL) || 'provider default'), true);
+      add('Smart model', (smartModel() || 'not set') + (autoUpgradeOn() ? ' (auto-upgrade ON)' : ' (auto-upgrade off)'), true);
+      add('Gemini key', localStorage.getItem(STORAGE_KEY) ? 'saved' : 'missing', !!localStorage.getItem(STORAGE_KEY));
+      add('OpenAI key', localStorage.getItem(OPENAI_STORAGE_KEY) ? 'saved' : 'missing', !!localStorage.getItem(OPENAI_STORAGE_KEY));
+      add('YouTube key', localStorage.getItem(YT_STORAGE_KEY) ? 'saved' : 'missing', !!localStorage.getItem(YT_STORAGE_KEY));
+      add('Signed in as', currentUser || 'nobody', !!currentUser);
+      add('Saved insights', (() => { try { return savedAll().length; } catch (e) { return '?'; } })(), true);
+      add('Context memory', contextInsights().length + ' insight(s) active', true);
+      add('Usage log', readLogs().length + ' entries', true);
+      try {
+        const rowsIdb = await idbAllTracks();
+        add('Offline music', (rowsIdb || []).length + ' track(s) stored', true);
+      } catch (e) { add('Offline music', 'IndexedDB unavailable', false); }
+      try {
+        if (navigator.storage && navigator.storage.estimate) {
+          const est = await navigator.storage.estimate();
+          add('Browser storage used', formatBytes(est.usage || 0) + ' of ' + formatBytes(est.quota || 0), true);
+        }
+      } catch (e) { /* not supported */ }
+
+      // Worker checks
+      const base = adminBase();
+      add('Worker URL', base || 'not set', !!base);
+      if (base) {
+        try {
+          const res = await fetch(base + '/health', { cache: 'no-store' });
+          const h = await res.json();
+          add('Worker reachable', 'yes (' + res.status + ')', res.ok);
+          add('Worker KV bound', h.kvBound ? 'yes' : 'NO — telemetry disabled', !!h.kvBound);
+          add('Worker KV writable', h.kvWritable ? 'yes' : 'no', !!h.kvWritable);
+          add('Worker ADMIN_TOKEN', h.adminTokenSet ? 'set' : 'NOT SET — admin routes disabled', !!h.adminTokenSet);
+          add('Telemetry ready', h.telemetryReady ? 'yes' : 'no', !!h.telemetryReady);
+          add('Owner username', h.owner || '?', true);
+          add('Private mode', h.privateMode ? 'ON (only owner)' : 'off', true);
+        } catch (e) {
+          add('Worker reachable', 'NO — ' + ((e && e.message) || e), false);
+        }
+        const token = teleToken.value.trim();
+        if (token) {
+          try {
+            const res = await fetch(base + '/admin/summary?token=' + encodeURIComponent(token));
+            add('Admin token accepted', res.ok ? 'yes' : 'NO (' + res.status + ')', res.ok);
+            if (res.ok) { const s = await res.json(); knownFlags = s.features || knownFlags; renderFlags(); }
+          } catch (e) { add('Admin token accepted', 'check failed', false); }
+        } else add('Admin token', 'not entered on the Usage tab', false);
+      }
+
+      const t = THEMES[theme] || THEMES.dark;
+      out.innerHTML = rows.map((r) =>
+        `<div class="gpa-admin-logrow"><span class="ev">${escapeHtml(r.label)}</span>`
+        + `<span class="t" style="color:${r.good === false ? '#ff6b6b' : (r.good ? '#22c55e' : t.sub)}">${escapeHtml(r.value)}</span></div>`
+      ).join('');
+      out.dataset.report = rows.map((r) => r.label + ': ' + r.value).join('\n');
+    }
+    panel.querySelector('#gpa-adm-diag-run').addEventListener('click', runDiagnostics);
+    panel.querySelector('#gpa-adm-diag-copy').addEventListener('click', () => {
+      const out = panel.querySelector('#gpa-adm-diag');
+      const text = out.dataset.report || '(run the checks first)';
+      navigator.clipboard.writeText(text).then(
+        () => { panel.querySelector('#gpa-adm-diag').insertAdjacentHTML('afterbegin', '<div class="gpa-sub">✓ copied</div>'); },
+        () => { const w = window.open('', '_blank'); if (w) w.document.write('<pre>' + escapeHtml(text) + '</pre>'); }
+      );
+    });
+
     // ---- Power tools ----
     // Known OpenAI chat model ids (Sept 2026). The Custom… option future-proofs
     // the list and covers Gemini ids; an invalid id just returns a clear 404.
@@ -8578,6 +9886,55 @@
         out.textContent = 'Error: ' + ((e && e.message) || e);
       }
     });
+
+    // ---- Data pane: API key manager ----
+    // Keys are shown masked — enough to tell which key is which, never enough
+    // to copy one out of a screenshot.
+    function maskKey(v) {
+      if (!v) return '';
+      return v.length <= 12 ? v.slice(0, 3) + '…' : v.slice(0, 6) + '…' + v.slice(-4) + ` (${v.length} chars)`;
+    }
+    function renderKeyManager() {
+      const wrap = panel.querySelector('#gpa-adm-keys');
+      if (!wrap) return;
+      wrap.innerHTML = '';
+      [['Gemini', STORAGE_KEY], ['OpenAI', OPENAI_STORAGE_KEY], ['YouTube', YT_STORAGE_KEY],
+       ['Admin token', ADMIN_KEYS.TELE_TOKEN]].forEach(([label, key]) => {
+        const v = localStorage.getItem(key) || '';
+        const row = document.createElement('div');
+        row.className = 'gpa-admin-userrow';
+        const left = document.createElement('span');
+        left.innerHTML = `<b>${escapeHtml(label)}</b> <span style="opacity:0.7">${v ? escapeHtml(maskKey(v)) : 'not set'}</span>`;
+        const btns = document.createElement('span');
+        btns.style.cssText = 'display:flex;gap:4px;';
+        if (v) {
+          const clear = document.createElement('button');
+          clear.className = 'gpa-btn';
+          clear.style.fontSize = '9px';
+          clear.textContent = 'Clear';
+          clear.addEventListener('click', () => {
+            if (!confirm(`Clear the ${label} key from this device?`)) return;
+            localStorage.removeItem(key);
+            renderKeyManager(); renderLsEditor();
+          });
+          btns.appendChild(clear);
+        }
+        const set = document.createElement('button');
+        set.className = 'gpa-btn';
+        set.style.fontSize = '9px';
+        set.textContent = v ? 'Replace' : 'Set';
+        set.addEventListener('click', () => {
+          const nv = prompt(`${label} key:`, '');
+          if (nv === null) return;
+          const clean = sanitizeKey(nv);
+          if (clean) localStorage.setItem(key, clean); else localStorage.removeItem(key);
+          renderKeyManager(); renderLsEditor();
+        });
+        btns.appendChild(set);
+        row.appendChild(left); row.appendChild(btns);
+        wrap.appendChild(row);
+      });
+    }
 
     // ---- Data pane: localStorage inspector ----
     function renderLsEditor() {
