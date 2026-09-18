@@ -4935,9 +4935,12 @@ function modelSupportsReasoning(id) { return REASONING_MODELS.has((id || '').tri
     try {
       const out = await callAI(userText, sys, imgs.length ? imgs : null, isHardQuestion(q));
       const { text: cleanText, confidence } = extractConfidenceLine(out);
-      askHistory.push({ role: 'user', content: qForModel }, { role: 'assistant', content: cleanText });
-        if (isHardQuestion(q)) maybeSuggestBetterModel(chatEl);
-      });
+    askHistory.push({ role: 'user', content: qForModel }, { role: 'assistant', content: cleanText });
+    if (askHistory.length > 40) askHistory = askHistory.slice(-40);
+    renderAskReply(thinking, cleanText, confidence, () => {
+      speak(cleanText);
+      if (isHardQuestion(q)) maybeSuggestBetterModel(chatEl);
+    });
     } catch (e) {
       showError(thinking, e, currentProviderLabel());
     }
