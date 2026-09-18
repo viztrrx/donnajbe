@@ -11,13 +11,46 @@
 //   /read?url=…        — fetches a web page server-side and returns its HTML
 //                        so research mode can read pages the browser itself
 //                        is not allowed to fetch (CORS). HTML/text only.
+//
+// Env vars: TELEMETRY (KV binding), ADMIN_TOKEN (owner secret), OWNER
+// (username, defaults 'viztrrx'). Optional, both off unless set:
+//   OWNER_CODE     — a shared secret a client must send as the X-GPA-Owner
+//                    header to post to /track or /chat/send as the OWNER
+//                    username. Prevents anyone else from claiming that name.
+//   COADMIN_TOKEN  — a second, lower-privilege admin token. A request
+//                    bearing it may call /admin/moderate, /admin/rooms,
+//                    /admin/clearchat, /admin/setunlock, /admin/summary, but
+//                    gets 403 on /admin/assignkey, /admin/config,
+//                    /admin/clear, /admin/audit, /admin/backup, /admin/restore.
+//
+// Moderation additions on top of the existing block/lock/kick (all via
+// /admin/moderate action, all reversible, all no-ops until used):
+//   mute/unmute        — a timed block (hours) that self-expires; no manual
+//                        unblock needed.
+//   warn/clearstrikes  — 3 warnings auto-escalates to a 24h mute and resets.
+//   approve/unapprove  — releases/re-flags a user held by approvalMode.
+//   freezeai/unfreezeai — cuts off only /v1/*; chat and /read keep working.
+//   shadowmute/unshadowmute — messages "send" successfully but are never
+//                        stored or shown to anyone.
+//   setfeatures        — per-user feature-flag overrides, merged over the
+//                        global features map in /track and /status.
+// /admin/rooms additions: slowmode (id, seconds) and banuser/unbanuser (id,
+// user) — a per-room cooldown and ban list, public room included.
+// /admin/config additions: readOnly (chat accepts only the owner),
+// approvalMode (new usernames start pending), blockedCountries (2-letter cf
+// country codes, blocks /v1/* and /chat/send), allowedModels + maxTokens
+// (caps on /v1/* request bodies), allowedOrigins (Origin allowlist for
+// /v1/*) — every one defaults to off/empty, i.e. today's behavior.
+// /admin/audit (GET) — last 100 admin actions, newest first, 90-day TTL.
+// /admin/backup (GET) / /admin/restore (POST) — full state export/import
+// (config, moderation records, rooms, audit), owner only.
 
 export default {
   async fetch(req, env) {
     const cors = {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-GPA-Key, X-GPA-User',
+      'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-GPA-Key, X-GPA-User, X-GPA-Owner',
       'Access-Control-Max-Age': '86400'
     };
     const json = (obj, status) => new Response(JSON.stringify(obj), {
@@ -37,26 +70,117 @@ export default {
       const m = await kv.get('mod:' + String(user).toLowerCase(), 'json');
       return m || { state: 'active', reason: '', kickNonce: 0 };
     };
+
+    // ---- Auth levels: owner (?token=ADMIN_TOKEN) vs an optional co-admin
+    // (?token=COADMIN_TOKEN). A co-admin may moderate day-to-day (mute, kick,
+    // room management, unlock codes) but never touch billing-sensitive or
+    // whole-system state (keys, global config, wipes, audit, backup/restore).
+    // Neither token is set by default, so nothing here changes behavior until
+    // the owner opts in by setting COADMIN_TOKEN.
+    const authLevel = (url, env) => {
+      const token = url.searchParams.get('token') || '';
+      const ADMIN = (env && env.ADMIN_TOKEN) || '';
+      const COADMIN = (env && env.COADMIN_TOKEN) || '';
+      if (ADMIN && token === ADMIN) return 'owner';
+      if (COADMIN && token === COADMIN) return 'coadmin';
+      return null;
+    };
+    // Owner-only route guard. Returns a Response to send back immediately, or
+    // null if the caller may proceed.
+    const requireOwner = (url, env) => {
+      const ADMIN = (env && env.ADMIN_TOKEN) || '';
+      if (!ADMIN) return json({ error: 'ADMIN_TOKEN not set on the worker' }, 500);
+      const level = authLevel(url, env);
+      if (!level) return json({ error: 'unauthorized' }, 401);
+      if (level !== 'owner') return json({ error: 'forbidden — owner only' }, 403);
+      return null;
+    };
+    // Owner-or-co-admin route guard, for the handful of day-to-day moderation
+    // routes a co-admin is allowed to use.
+    const requireStaff = (url, env) => {
+      const ADMIN = (env && env.ADMIN_TOKEN) || '';
+      if (!ADMIN) return json({ error: 'ADMIN_TOKEN not set on the worker' }, 500);
+      const level = authLevel(url, env);
+      if (!level) return json({ error: 'unauthorized' }, 401);
+      return null;
+    };
+    // Hashes both sides to a fixed-length digest before comparing, so neither
+    // the comparison time nor an early-exit reveals how much of the guess was
+    // right or how long the real value is. Used only for OWNER_CODE, the
+    // shared secret that proves a client claiming the owner's username
+    // actually is the owner (see /track and /chat/send).
+    const timingSafeEqualStr = async (a, b) => {
+      const ha = await sha256hex(String(a || ''));
+      const hb = await sha256hex(String(b || ''));
+      let diff = 0;
+      for (let i = 0; i < ha.length; i++) diff |= ha.charCodeAt(i) ^ hb.charCodeAt(i);
+      return diff === 0;
+    };
+    // Appends one line to the append-only audit trail (every /admin/* write).
+    // Zero-padded timestamp so lexicographic KV order is also chronological
+    // order. Best-effort: a logging failure never blocks the action itself.
+    const AUDIT_TTL = 60 * 60 * 24 * 90; // 90 days
+    const logAudit = async (kv, entry) => {
+      if (!kv) return;
+      try {
+        const ts = Date.now();
+        const rand = Math.random().toString(36).slice(2, 8);
+        await kv.put(`audit:${String(ts).padStart(13, '0')}:${rand}`, JSON.stringify({ ...entry, ts }), { expirationTtl: AUDIT_TTL });
+      } catch (e) { /* auditing must never block the real action */ }
+    };
     // Global, owner-controlled settings pushed to every client on its next
     // status poll: private mode, a broadcast banner, a reload counter the
     // clients compare against to force-refresh, and feature kill-switches.
-    const CONFIG_DEFAULTS = { privateMode: false, broadcast: '', reloadVersion: 0, features: {}, announcement: null };
+    const CONFIG_DEFAULTS = {
+      privateMode: false, broadcast: '', reloadVersion: 0, features: {}, announcement: null,
+      dailyQuota: 0,        // OpenAI requests/day per non-owner user; 0 = unlimited
+      brandName: '',        // '' = client keeps its own built-in "Agent Console" name
+      defaultTheme: '',     // '' = client keeps its own built-in default theme
+      readOnly: false,          // true = only the owner can post to chat
+      approvalMode: false,      // true = a brand-new username starts pending, needs /admin/moderate approve
+      blockedCountries: [],     // 2-letter cf.country codes refused on /v1/* and /chat/send
+      allowedModels: [],        // empty = allow any model on /v1/*
+      maxTokens: 0,             // 0 = no cap on body.max_tokens
+      allowedOrigins: []        // empty = allow any Origin on /v1/*
+    };
     const getConfig = async (kv) => {
       const stored = kv ? await kv.get('config', 'json') : null;
       return { ...CONFIG_DEFAULTS, ...(stored || {}) };
     };
 
     // Effective state for one user, combining their own moderation record with
-    // global config. Order: owner is always active; an explicit block/lock
-    // wins next; then private mode blocks anyone without an allow exemption.
+    // global config. Order: owner is always active; a timed mute wins while
+    // it's still running (self-expires, no manual unblock needed); an
+    // explicit block/lock wins next; then private mode blocks anyone without
+    // an allow exemption.
     const resolveState = (mod, cfg, user) => {
       if (String(user).toLowerCase() === OWNER) return { state: 'active', reason: '', kickNonce: 0, owner: true };
+      if (mod.mutedUntil && mod.mutedUntil > Date.now()) {
+        return { state: 'blocked', reason: mod.reason || 'Temporarily muted.', kickNonce: mod.kickNonce || 0, muted: true, mutedUntil: mod.mutedUntil };
+      }
       if (mod.state === 'blocked') return { state: 'blocked', reason: mod.reason || '', kickNonce: mod.kickNonce || 0 };
       if (mod.state === 'locked') return { state: 'locked', reason: mod.reason || '', kickNonce: mod.kickNonce || 0 };
       if (cfg.privateMode && !mod.allow) return { state: 'blocked', reason: mod.reason || 'This tool is currently private — access is limited to the owner.', kickNonce: mod.kickNonce || 0, private: true };
       return { state: 'active', reason: '', kickNonce: mod.kickNonce || 0 };
     };
     const resolve = async (kv, user) => resolveState(await getMod(kv, user), await getConfig(kv), user);
+    // Resolves both providers' assigned keys for one user: a key aimed at
+    // this exact username wins; otherwise an "assign to everyone" key (see
+    // /admin/assignkey) applies. Delivered to the client via /track and
+    // /status so it lands in their own localStorage without them ever
+    // pasting it — see the client-side handling in script.js.
+    const getAssignedKeys = async (kv, user) => {
+      if (!kv || !user) return {};
+      const u = String(user).toLowerCase();
+      const out = {};
+      for (const provider of ['openai', 'gemini']) {
+        const specific = await kv.get(`key:${provider}:${u}`, 'json');
+        const wildcard = specific ? null : await kv.get(`key:${provider}:*`, 'json');
+        const rec = specific || wildcard;
+        if (rec && rec.key) out[provider] = rec.key;
+      }
+      return out;
+    };
     const sha256hex = async (str) => {
       const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
       return [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, '0')).join('');
@@ -113,7 +237,7 @@ export default {
           '/chat/poll', '/chat/send',
           '/admin/summary', '/admin/moderate', '/admin/setunlock', '/unlock',
           '/admin/config', '/admin/clear', '/admin/clearchat', '/admin/rooms',
-          '/admin/assignkey'
+          '/admin/assignkey', '/admin/audit', '/admin/backup', '/admin/restore'
         ]
       });
     }
@@ -126,9 +250,19 @@ export default {
       try { body = JSON.parse(await req.text()); } catch (e) { /* tolerate */ }
       const clip = (v, n) => String(v == null ? '' : v).slice(0, n);
       const user = clip(body.user || 'anonymous', 80);
+      const userLower = user.toLowerCase();
+      // Nobody may claim the owner's username without proving it (see
+      // /chat/send for the full rationale). Inactive until OWNER_CODE is set.
+      if (userLower === OWNER && env && env.OWNER_CODE) {
+        const proof = req.headers.get('X-GPA-Owner') || '';
+        if (!(await timingSafeEqualStr(proof, env.OWNER_CODE))) {
+          return json({ ok: false, error: 'name reserved' }, 200);
+        }
+      }
       const sid = clip(body.sid, 60) || crypto.randomUUID();
       const now = Date.now();
       const cf = req.cf || {};
+      const cfg = await getConfig(kv);
       const rec = {
         user,
         host: clip(body.host, 120),
@@ -143,7 +277,7 @@ export default {
         // All-time rollup, refreshed on the "open" event (not every beat) to
         // stay well inside KV's free-tier write budget.
         if (body.event === 'open') {
-          const uKey = 'user:' + user.toLowerCase();
+          const uKey = 'user:' + userLower;
           const prev = await kv.get(uKey, 'json');
           await kv.put(uKey, JSON.stringify({
             user,
@@ -154,18 +288,30 @@ export default {
             lastSeen: now,
             opens: ((prev && prev.opens) || 0) + 1
           }));
+          // Approval queue: a genuinely new username (no prior rollup) starts
+          // pending when the owner has approvalMode on — /v1/* then refuses
+          // them until /admin/moderate action "approve" is used.
+          if (!prev && cfg.approvalMode && userLower !== OWNER) {
+            const modKey = 'mod:' + userLower;
+            const curMod = (await kv.get(modKey, 'json')) || { state: 'active', reason: '', kickNonce: 0 };
+            curMod.pending = true;
+            await kv.put(modKey, JSON.stringify(curMod));
+          }
         }
       } catch (e) { return json({ ok: false }, 200); }
       // Hand the caller its own effective state back on every beat, so a
       // block/lock/kick/private-mode change reaches them within one heartbeat
       // even without the separate /status poll.
       const r = await resolve(kv, user);
-      const cfg = await getConfig(kv);
+      const mod = await getMod(kv, user);
+      const assignedKeys = await getAssignedKeys(kv, user);
       return json({
         ok: true, state: r.state, reason: r.reason, kickNonce: r.kickNonce,
         owner: !!r.owner, private: !!r.private,
-        broadcast: cfg.broadcast || '', reloadVersion: cfg.reloadVersion || 0, features: cfg.features || {},
-        announcement: cfg.announcement || null
+        broadcast: cfg.broadcast || '', reloadVersion: cfg.reloadVersion || 0,
+        features: { ...(cfg.features || {}), ...(mod.features || {}) },
+        announcement: cfg.announcement || null, assignedKeys,
+        brandName: cfg.brandName || '', defaultTheme: cfg.defaultTheme || ''
       });
     }
 
@@ -173,28 +319,32 @@ export default {
     // effect fast without waiting for the next (write-costing) heartbeat.
     if (url.pathname === '/status' && req.method === 'GET') {
       const kv = env && env.TELEMETRY;
-      const r = await resolve(kv, url.searchParams.get('user') || '');
+      const statusUser = url.searchParams.get('user') || '';
+      const r = await resolve(kv, statusUser);
       const cfg = await getConfig(kv);
+      const mod = await getMod(kv, statusUser);
+      const assignedKeys = await getAssignedKeys(kv, statusUser);
       return json({
         state: r.state, reason: r.reason, kickNonce: r.kickNonce,
         owner: !!r.owner, private: !!r.private,
-        broadcast: cfg.broadcast || '', reloadVersion: cfg.reloadVersion || 0, features: cfg.features || {},
-        announcement: cfg.announcement || null
+        broadcast: cfg.broadcast || '', reloadVersion: cfg.reloadVersion || 0,
+        features: { ...(cfg.features || {}), ...(mod.features || {}) },
+        announcement: cfg.announcement || null, assignedKeys,
+        brandName: cfg.brandName || '', defaultTheme: cfg.defaultTheme || ''
       });
     }
 
-    // Owner sets a user's moderation state. Token-gated like the other admin
-    // routes, so only the owner can call it.
+    // Sets a user's moderation state. Owner or co-admin (see authLevel above).
     if (url.pathname === '/admin/moderate' && req.method === 'POST') {
       const kv = env && env.TELEMETRY;
-      const ADMIN = (env && env.ADMIN_TOKEN) || '';
       if (!kv) return json({ error: 'telemetry KV not bound' }, 500);
-      if (!ADMIN || (url.searchParams.get('token') || '') !== ADMIN) return json({ error: 'unauthorized' }, 401);
+      const denied = requireStaff(url, env);
+      if (denied) return denied;
       let body = {};
       try { body = JSON.parse(await req.text()); } catch (e) { /* tolerate */ }
       const user = String(body.user || '').toLowerCase().slice(0, 80);
       if (!user) return json({ error: 'no user' }, 400);
-      // The owner can never be blocked/locked/kicked.
+      // The owner can never be blocked/locked/kicked/muted/frozen/etc.
       if (user === OWNER) return json({ ok: false, error: 'This user is the owner and is immune to moderation.' }, 200);
       const key = 'mod:' + user;
       const cur = (await kv.get(key, 'json')) || { state: 'active', reason: '', kickNonce: 0 };
@@ -204,19 +354,45 @@ export default {
       else if (action === 'lock') cur.state = 'locked';
       else if (action === 'unlock' || action === 'reset') cur.state = 'active';
       else if (action === 'kick') cur.kickNonce = (cur.kickNonce || 0) + 1;
-      else return json({ error: 'unknown action' }, 400);
+      // Timed mute: self-expires (see resolveState's mutedUntil check), no
+      // manual unblock needed. `hours` may be fractional (e.g. 0.5 = 30 min).
+      else if (action === 'mute') cur.mutedUntil = Date.now() + Math.max(0, Number(body.hours) || 0) * 3600000;
+      else if (action === 'unmute') delete cur.mutedUntil;
+      // Strike system: 3 warnings auto-escalates to a 24h mute and resets
+      // the counter, so a warned-and-behaving user isn't left flagged.
+      else if (action === 'warn') {
+        cur.strikes = (cur.strikes || 0) + 1;
+        if (cur.strikes >= 3) { cur.mutedUntil = Date.now() + 24 * 3600000; cur.strikes = 0; }
+      } else if (action === 'clearstrikes') cur.strikes = 0;
+      // Approval queue (see approvalMode in /admin/config and /track).
+      else if (action === 'approve') cur.pending = false;
+      else if (action === 'unapprove') cur.pending = true;
+      // Per-user AI freeze: blocks only /v1/*, chat and /read still work.
+      else if (action === 'freezeai') cur.aiFrozen = true;
+      else if (action === 'unfreezeai') cur.aiFrozen = false;
+      // Shadow mute: the user believes every message sent, nobody sees any of them.
+      else if (action === 'shadowmute') cur.shadowMuted = true;
+      else if (action === 'unshadowmute') cur.shadowMuted = false;
+      // Per-user feature-flag overrides, merged over the global features map
+      // (see /track and /status) — e.g. turn quiz-solving off for one user
+      // without touching everyone else's access.
+      else if (action === 'setfeatures') {
+        if (!body.features || typeof body.features !== 'object') return json({ error: 'features object required' }, 400);
+        cur.features = { ...(cur.features || {}), ...body.features };
+      } else return json({ error: 'unknown action' }, 400);
       cur.reason = String(body.reason || '').slice(0, 300);
       cur.updatedAt = Date.now();
       await kv.put(key, JSON.stringify(cur));
+      await logAudit(kv, { route: '/admin/moderate', action, target: user, admin: authLevel(url, env) });
       return json({ ok: true, user, mod: cur });
     }
 
-    // Global config: currently just private mode (block everyone but owner).
+    // Global config. Owner only — a co-admin never touches whole-system state.
     if (url.pathname === '/admin/config' && req.method === 'POST') {
       const kv = env && env.TELEMETRY;
-      const ADMIN = (env && env.ADMIN_TOKEN) || '';
       if (!kv) return json({ error: 'telemetry KV not bound' }, 500);
-      if (!ADMIN || (url.searchParams.get('token') || '') !== ADMIN) return json({ error: 'unauthorized' }, 401);
+      const denied = requireOwner(url, env);
+      if (denied) return denied;
       let body = {};
       try { body = JSON.parse(await req.text()); } catch (e) { /* tolerate */ }
       const cfg = await getConfig(kv);
@@ -231,10 +407,20 @@ export default {
           : null;
       }
       if (body.features && typeof body.features === 'object') cfg.features = { ...cfg.features, ...body.features };
+      if ('dailyQuota' in body) cfg.dailyQuota = Math.max(0, parseInt(body.dailyQuota, 10) || 0);
+      if ('brandName' in body) cfg.brandName = String(body.brandName || '').slice(0, 60);
+      if ('defaultTheme' in body) cfg.defaultTheme = String(body.defaultTheme || '').slice(0, 20);
+      if ('readOnly' in body) cfg.readOnly = !!body.readOnly;
+      if ('approvalMode' in body) cfg.approvalMode = !!body.approvalMode;
+      if (Array.isArray(body.blockedCountries)) cfg.blockedCountries = body.blockedCountries.map((c) => String(c || '').toUpperCase().slice(0, 2)).filter(Boolean).slice(0, 250);
+      if (Array.isArray(body.allowedModels)) cfg.allowedModels = body.allowedModels.map((m) => String(m || '').slice(0, 80)).filter(Boolean).slice(0, 100);
+      if ('maxTokens' in body) cfg.maxTokens = Math.max(0, parseInt(body.maxTokens, 10) || 0);
+      if (Array.isArray(body.allowedOrigins)) cfg.allowedOrigins = body.allowedOrigins.map((o) => String(o || '').slice(0, 200)).filter(Boolean).slice(0, 100);
       // Bumping this makes every client notice it is out of date on its next
       // status poll and pull the latest script.
       if (body.bumpReload) cfg.reloadVersion = (cfg.reloadVersion || 0) + 1;
       await kv.put('config', JSON.stringify(cfg));
+      await logAudit(kv, { route: '/admin/config', action: 'update', target: null, admin: 'owner' });
       return json({ ok: true, config: cfg, owner: OWNER });
     }
 
@@ -255,6 +441,14 @@ export default {
     const CHAT_MAX = 120;                // messages returned per poll
     const pad = (n) => String(n).padStart(13, '0');
     const roomKey = (id) => 'room:' + String(id).toLowerCase().slice(0, 40);
+    // Per-room moderation settings (slow mode + bans), kept separate from
+    // roomKey's name/codeHash record so this also works for the public room,
+    // which has no room: record of its own.
+    const roomCfgKey = (id) => 'roomcfg:' + String(id).toLowerCase().slice(0, 40);
+    const getRoomCfg = async (kv, id) => {
+      const stored = await kv.get(roomCfgKey(id), 'json');
+      return { slowModeSec: 0, bannedUsers: [], ...(stored || {}) };
+    };
 
     // Returns { ok } or { ok:false, error } for a room + supplied code.
     const checkRoomAccess = async (kv, roomId, code) => {
@@ -274,16 +468,54 @@ export default {
       let body = {};
       try { body = JSON.parse(await req.text()); } catch (e) { /* tolerate */ }
       const user = String(body.user || 'anonymous').slice(0, 40);
+      const userLower = user.toLowerCase();
       const text = String(body.text || '').trim().slice(0, 500);
       if (!text) return json({ ok: false, error: 'empty message' }, 200);
-      // A blocked user (or anyone shut out by private mode) can't post.
+      // Nobody may claim the owner's username without proving it (OWNER_CODE,
+      // sent as X-GPA-Owner) — otherwise any visitor could sign in as the
+      // owner's name and inherit the 👑 badge and moderation immunity in
+      // other users' eyes. Inactive until OWNER_CODE is actually set, so
+      // this can't lock out the real owner on a worker that hasn't opted in.
+      if (userLower === OWNER && env && env.OWNER_CODE) {
+        const proof = req.headers.get('X-GPA-Owner') || '';
+        if (!(await timingSafeEqualStr(proof, env.OWNER_CODE))) {
+          return json({ ok: false, error: 'name reserved' }, 200);
+        }
+      }
+      // A blocked user (or anyone shut out by private mode or a timed mute) can't post.
       const st = await resolve(kv, user);
       if (st.state === 'blocked') return json({ ok: false, error: 'You are blocked from chat.' }, 200);
+      const cfg = await getConfig(kv);
+      if (cfg.readOnly && userLower !== OWNER) return json({ ok: false, error: 'chat is read-only' }, 200);
+      const cf = req.cf || {};
+      if (cfg.blockedCountries.length && cfg.blockedCountries.includes(String(cf.country || '').toUpperCase())) {
+        return json({ ok: false, error: 'not available in your region' }, 403);
+      }
       const access = await checkRoomAccess(kv, body.room, body.code);
       if (!access.ok) return json({ ok: false, error: access.error }, 200);
+      const roomCfg = await getRoomCfg(kv, access.id);
+      if (roomCfg.bannedUsers.includes(userLower)) {
+        return json({ ok: false, error: 'banned from this room' }, 200);
+      }
+      // Slow mode: one message per cooldown window per user per room. The
+      // cooldown key's own TTL doubles as its cleanup — nothing to sweep.
+      if (roomCfg.slowModeSec > 0 && userLower !== OWNER) {
+        const coolKey = `cooldown:${access.id}:${userLower}`;
+        const last = parseInt(await kv.get(coolKey), 10) || 0;
+        const elapsed = (Date.now() - last) / 1000;
+        if (last && elapsed < roomCfg.slowModeSec) {
+          return json({ ok: false, error: `slow mode: wait ${Math.ceil(roomCfg.slowModeSec - elapsed)}s` }, 200);
+        }
+        await kv.put(coolKey, String(Date.now()), { expirationTtl: Math.max(roomCfg.slowModeSec, 60) + 5 });
+      }
       const ts = Date.now();
+      // Shadow mute: report success so the sender is none the wiser, but
+      // store nothing — /chat/poll (for anyone, including the sender's other
+      // devices) never has it to return.
+      const mod = await getMod(kv, user);
+      if (mod.shadowMuted) return json({ ok: true, ts });
       const key = `msg:${access.id}:${pad(ts)}:${Math.random().toString(36).slice(2, 7)}`;
-      const meta = { u: user, t: text, ts, owner: String(user).toLowerCase() === OWNER };
+      const meta = { u: user, t: text, ts, owner: userLower === OWNER };
       try {
         await kv.put(key, '', { expirationTtl: CHAT_TTL, metadata: meta });
       } catch (e) {
@@ -312,22 +544,25 @@ export default {
     // waiting for it, or for an ad-hoc reset.
     if (url.pathname === '/admin/clearchat' && req.method === 'POST') {
       const kv = env && env.TELEMETRY;
-      const ADMIN = (env && env.ADMIN_TOKEN) || '';
       if (!kv) return json({ error: 'chat storage not configured' }, 500);
-      if (!ADMIN || (url.searchParams.get('token') || '') !== ADMIN) return json({ error: 'unauthorized' }, 401);
+      const denied = requireStaff(url, env);
+      if (denied) return denied;
       const deleted = await clearAllChatMessages(kv);
+      await logAudit(kv, { route: '/admin/clearchat', action: 'clearchat', target: null, admin: authLevel(url, env) });
       return json({ ok: true, deleted });
     }
 
-    // Owner: create / list / delete private rooms.
+    // Create / list / delete private rooms, plus per-room slow mode and bans.
+    // Owner or co-admin.
     if (url.pathname === '/admin/rooms' && req.method === 'POST') {
       const kv = env && env.TELEMETRY;
-      const ADMIN = (env && env.ADMIN_TOKEN) || '';
       if (!kv) return json({ error: 'chat storage not configured' }, 500);
-      if (!ADMIN || (url.searchParams.get('token') || '') !== ADMIN) return json({ error: 'unauthorized' }, 401);
+      const denied = requireStaff(url, env);
+      if (denied) return denied;
       let body = {};
       try { body = JSON.parse(await req.text()); } catch (e) { /* tolerate */ }
       const action = body.action || 'list';
+      const admin = authLevel(url, env);
 
       if (action === 'create') {
         const name = String(body.name || '').trim().slice(0, 40);
@@ -338,14 +573,17 @@ export default {
         await kv.put(roomKey(id), JSON.stringify({
           id, name, codeHash: await sha256hex(id + '|' + code), createdAt: Date.now()
         }));
+        await logAudit(kv, { route: '/admin/rooms', action, target: id, admin });
         return json({ ok: true, id, name, code });
       }
       if (action === 'delete') {
         const id = String(body.id || '').toLowerCase().slice(0, 40);
         if (!id || id === 'public') return json({ error: 'cannot delete that room' }, 400);
         await kv.delete(roomKey(id));
+        await kv.delete(roomCfgKey(id));
         const msgs = await kv.list({ prefix: `msg:${id}:` });
         for (const k of msgs.keys) await kv.delete(k.name);
+        await logAudit(kv, { route: '/admin/rooms', action, target: id, admin });
         return json({ ok: true, deleted: id });
       }
       if (action === 'newcode') {
@@ -355,7 +593,33 @@ export default {
         const code = genCode();
         room.codeHash = await sha256hex(id + '|' + code);
         await kv.put(roomKey(id), JSON.stringify(room));
+        await logAudit(kv, { route: '/admin/rooms', action, target: id, admin });
         return json({ ok: true, id, code });
+      }
+      // Slow mode: seconds between messages, per user, in this room (public
+      // room included — pass id:"public" or omit id).
+      if (action === 'slowmode') {
+        const id = String(body.id || 'public').toLowerCase().slice(0, 40);
+        const seconds = Math.max(0, parseInt(body.seconds, 10) || 0);
+        const rc = await getRoomCfg(kv, id);
+        rc.slowModeSec = seconds;
+        await kv.put(roomCfgKey(id), JSON.stringify(rc));
+        await logAudit(kv, { route: '/admin/rooms', action, target: id, admin });
+        return json({ ok: true, id, slowModeSec: seconds });
+      }
+      // Room bans: this room only, the user can still use every other room.
+      if (action === 'banuser' || action === 'unbanuser') {
+        const id = String(body.id || 'public').toLowerCase().slice(0, 40);
+        const target = String(body.user || '').toLowerCase().slice(0, 80);
+        if (!target) return json({ error: 'no user' }, 400);
+        if (target === OWNER) return json({ error: 'the owner cannot be banned' }, 400);
+        const rc = await getRoomCfg(kv, id);
+        const set = new Set(rc.bannedUsers);
+        if (action === 'banuser') set.add(target); else set.delete(target);
+        rc.bannedUsers = [...set];
+        await kv.put(roomCfgKey(id), JSON.stringify(rc));
+        await logAudit(kv, { route: '/admin/rooms', action, target: `${id}:${target}`, admin });
+        return json({ ok: true, id, bannedUsers: rc.bannedUsers });
       }
       // list
       const listed = await kv.list({ prefix: 'room:' });
@@ -367,31 +631,42 @@ export default {
       return json({ ok: true, rooms });
     }
 
-    // Owner assigns a specific OpenAI key to one user. The key is stored here
-    // (never sent to the browser) and the /v1/* forwarder below prefers it
-    // over anything the client supplies, so it takes effect immediately and
-    // stays in force until the owner clears it — the user never sees or
-    // handles the key at all. Only OpenAI is supported: those calls already
-    // route through this worker, so the key never has to leave the server.
-    // Gemini calls go straight from the browser to Google and can't be
-    // covered this way without exposing the key to that browser.
+    // Owner assigns an OpenAI or Gemini key to one user, several users, or
+    // everyone. The key is stored server-side under key:<provider>:<user>
+    // (or key:<provider>:* for "everyone"). Two delivery paths apply it:
+    //  - OpenAI: the /v1/* forwarder below prefers it over anything the
+    //    client supplies, so it works immediately without the key ever
+    //    reaching that user's browser.
+    //  - Both providers: every /track heartbeat and /status poll hands the
+    //    calling user their own resolved key back (see getAssignedKeys
+    //    above), and script.js writes it into that user's own localStorage
+    //    on receipt — this is required for Gemini (called straight from the
+    //    browser, no proxy to inject into) and is also how OpenAI keys reach
+    //    a user who then goes into direct/no-proxy mode.
+    // Accepts either the current multi-target shape ({provider, users:[...],
+    // all:true, key}) or the original single-user shape ({user, key}) for
+    // back-compat with older admin-panel builds.
     if (url.pathname === '/admin/assignkey' && req.method === 'POST') {
       const kv = env && env.TELEMETRY;
-      const ADMIN = (env && env.ADMIN_TOKEN) || '';
       if (!kv) return json({ error: 'telemetry KV not bound' }, 500);
-      if (!ADMIN || (url.searchParams.get('token') || '') !== ADMIN) return json({ error: 'unauthorized' }, 401);
+      const denied = requireOwner(url, env);
+      if (denied) return denied;
       let body = {};
       try { body = JSON.parse(await req.text()); } catch (e) { /* tolerate */ }
-      const user = String(body.user || '').toLowerCase().slice(0, 80);
-      if (!user) return json({ error: 'no user' }, 400);
+      const provider = (String(body.provider || 'openai').toLowerCase() === 'gemini') ? 'gemini' : 'openai';
       const key = String(body.key || '').trim();
-      const rkey = 'key:openai:' + user;
-      if (!key) {
-        await kv.delete(rkey);
-        return json({ ok: true, user, assigned: false });
+      const all = !!body.all;
+      let targets = Array.isArray(body.users) ? body.users : (body.user ? [body.user] : []);
+      targets = [...new Set(targets.map((u) => String(u || '').toLowerCase().slice(0, 80)).filter(Boolean))];
+      if (!all && !targets.length) return json({ error: 'no user(s) specified' }, 400);
+      const keysTouched = all ? ['*'] : targets;
+      for (const u of keysTouched) {
+        const rkey = `key:${provider}:${u}`;
+        if (!key) await kv.delete(rkey);
+        else await kv.put(rkey, JSON.stringify({ key, assignedAt: Date.now() }));
       }
-      await kv.put(rkey, JSON.stringify({ key, assignedAt: Date.now() }));
-      return json({ ok: true, user, assigned: true });
+      await logAudit(kv, { route: '/admin/assignkey', action: key ? 'assign' : 'remove', target: all ? '*' : targets.join(','), admin: 'owner' });
+      return json({ ok: true, provider, all, users: targets, assigned: !!key });
     }
 
     // Owner mints a one-time unlock code for ONE user. We store only its hash,
@@ -399,9 +674,9 @@ export default {
     // code releases only this username's block, and is consumed on use.
     if (url.pathname === '/admin/setunlock' && req.method === 'POST') {
       const kv = env && env.TELEMETRY;
-      const ADMIN = (env && env.ADMIN_TOKEN) || '';
       if (!kv) return json({ error: 'telemetry KV not bound' }, 500);
-      if (!ADMIN || (url.searchParams.get('token') || '') !== ADMIN) return json({ error: 'unauthorized' }, 401);
+      const denied = requireStaff(url, env);
+      if (denied) return denied;
       let body = {};
       try { body = JSON.parse(await req.text()); } catch (e) { /* tolerate */ }
       const user = String(body.user || '').toLowerCase().slice(0, 80);
@@ -412,6 +687,7 @@ export default {
       cur.unlock = await sha256hex(user + '|' + code);   // only the hash is stored
       cur.unlockAt = Date.now();
       await kv.put(key, JSON.stringify(cur));
+      await logAudit(kv, { route: '/admin/setunlock', action: 'setunlock', target: user, admin: authLevel(url, env) });
       return json({ ok: true, user, code });
     }
 
@@ -443,10 +719,9 @@ export default {
 
     if (url.pathname === '/admin/summary' && req.method === 'GET') {
       const kv = env && env.TELEMETRY;
-      const ADMIN = (env && env.ADMIN_TOKEN) || '';
       if (!kv) return json({ error: 'telemetry KV not bound on the worker' }, 500);
-      if (!ADMIN) return json({ error: 'ADMIN_TOKEN not set on the worker' }, 500);
-      if ((url.searchParams.get('token') || '') !== ADMIN) return json({ error: 'unauthorized' }, 401);
+      const denied = requireStaff(url, env);   // a co-admin needs this to know who to moderate
+      if (denied) return denied;
 
       const active = [];
       const sess = await kv.list({ prefix: 'session:' });
@@ -461,12 +736,38 @@ export default {
       const mods = {};
       const ml = await kv.list({ prefix: 'mod:' });
       for (const k of ml.keys) { const v = await kv.get(k.name, 'json'); if (v) mods[k.name.slice(4)] = v; }
-      const keyed = new Set();
+      const keyedOpenai = new Set();
+      const keyedGemini = new Set();
       const kl = await kv.list({ prefix: 'key:openai:' });
-      kl.keys.forEach((k) => keyed.add(k.name.slice('key:openai:'.length)));
+      kl.keys.forEach((k) => keyedOpenai.add(k.name.slice('key:openai:'.length)));
+      const glk = await kv.list({ prefix: 'key:gemini:' });
+      glk.keys.forEach((k) => keyedGemini.add(k.name.slice('key:gemini:'.length)));
+      const allOpenaiKeyed = keyedOpenai.has('*');
+      const allGeminiKeyed = keyedGemini.has('*');
+      // Today's per-user request count, for the Usage tab's analytics — reuses
+      // the same usage:<day>:<user> counters /v1/*'s quota check maintains.
+      const today = new Date().toISOString().slice(0, 10);
+      const usageToday = {};
+      const ul2 = await kv.list({ prefix: `usage:${today}:` });
+      for (const k of ul2.keys) {
+        const u = k.name.slice(`usage:${today}:`.length);
+        usageToday[u] = parseInt(await kv.get(k.name), 10) || 0;
+      }
       const stampOne = (x) => {
-        const r = resolveState(mods[String(x.user).toLowerCase()] || { state: 'active' }, cfg, x.user);
-        return { ...x, state: r.state, reason: r.reason, owner: !!r.owner, private: !!r.private, hasOpenAiKey: keyed.has(String(x.user).toLowerCase()) };
+        const u = String(x.user).toLowerCase();
+        const mod = mods[u] || { state: 'active' };
+        const r = resolveState(mod, cfg, x.user);
+        return {
+          ...x, state: r.state, reason: r.reason, owner: !!r.owner, private: !!r.private,
+          hasOpenAiKey: keyedOpenai.has(u) || allOpenaiKeyed,
+          hasGeminiKey: keyedGemini.has(u) || allGeminiKeyed,
+          requestsToday: usageToday[u] || 0,
+          strikes: mod.strikes || 0,
+          pending: !!mod.pending,
+          muted: !!r.muted, mutedUntil: r.mutedUntil || 0,
+          aiFrozen: !!mod.aiFrozen,
+          shadowMuted: !!mod.shadowMuted
+        };
       };
 
       // Collapse multiple live sessions from one user into a single presence.
@@ -481,21 +782,103 @@ export default {
         privateMode: !!cfg.privateMode,
         activeCount: Object.keys(activeByUser).length,
         active: Object.values(activeByUser).sort((a, b) => b.lastSeen - a.lastSeen).map(stampOne),
-        users: users.sort((a, b) => b.lastSeen - a.lastSeen).map(stampOne)
+        users: users.sort((a, b) => b.lastSeen - a.lastSeen).map(stampOne),
+        allOpenaiKeyed, allGeminiKeyed, dailyQuota: cfg.dailyQuota || 0
       });
     }
 
     if (url.pathname === '/admin/clear' && req.method === 'POST') {
       const kv = env && env.TELEMETRY;
-      const ADMIN = (env && env.ADMIN_TOKEN) || '';
       if (!kv) return json({ error: 'telemetry KV not bound' }, 500);
-      if (!ADMIN || (url.searchParams.get('token') || '') !== ADMIN) return json({ error: 'unauthorized' }, 401);
+      const denied = requireOwner(url, env);
+      if (denied) return denied;
       let deleted = 0;
       for (const prefix of ['session:', 'user:']) {
         const list = await kv.list({ prefix });
         for (const k of list.keys) { await kv.delete(k.name); deleted++; }
       }
+      await logAudit(kv, { route: '/admin/clear', action: 'clear', target: null, admin: 'owner' });
       return json({ ok: true, deleted });
+    }
+
+    // Append-only audit trail of every /admin/* mutation (see logAudit
+    // above). Owner only — a co-admin's own actions are logged in it, but
+    // they don't get to read it. Newest first, capped at the most recent
+    // 1000 KV entries so this stays a single fast list() call.
+    if (url.pathname === '/admin/audit' && req.method === 'GET') {
+      const kv = env && env.TELEMETRY;
+      if (!kv) return json({ error: 'telemetry KV not bound' }, 500);
+      const denied = requireOwner(url, env);
+      if (denied) return denied;
+      const listed = await kv.list({ prefix: 'audit:', limit: 1000 });
+      const entries = [];
+      for (const k of listed.keys) {
+        const v = await kv.get(k.name, 'json');
+        if (v) entries.push(v);
+      }
+      entries.sort((a, b) => b.ts - a.ts);
+      return json({ ok: true, entries: entries.slice(0, 100) });
+    }
+
+    // Full-state export/import: config, every mod: record, every room: and
+    // roomcfg: record, and the audit log. Owner only, dependency-free JSON —
+    // meant as a portable snapshot you can save externally and restore from,
+    // not an automatic backup schedule.
+    if (url.pathname === '/admin/backup' && req.method === 'GET') {
+      const kv = env && env.TELEMETRY;
+      if (!kv) return json({ error: 'telemetry KV not bound' }, 500);
+      const denied = requireOwner(url, env);
+      if (denied) return denied;
+      const cfg = await getConfig(kv);
+      const dumpPrefix = async (prefix) => {
+        const out = {};
+        let cursor;
+        do {
+          const listed = await kv.list({ prefix, cursor });
+          for (const k of listed.keys) { const v = await kv.get(k.name, 'json'); if (v) out[k.name] = v; }
+          cursor = listed.list_complete ? undefined : listed.cursor;
+        } while (cursor);
+        return out;
+      };
+      const mods = await dumpPrefix('mod:');
+      const rooms = await dumpPrefix('room:');
+      const roomCfgs = await dumpPrefix('roomcfg:');
+      const auditKeys = [];
+      let cursor;
+      do {
+        const listed = await kv.list({ prefix: 'audit:', cursor });
+        for (const k of listed.keys) { const v = await kv.get(k.name, 'json'); if (v) auditKeys.push({ key: k.name, entry: v }); }
+        cursor = listed.list_complete ? undefined : listed.cursor;
+      } while (cursor);
+      return json({ ok: true, backupAt: Date.now(), config: cfg, mods, rooms, roomCfgs, audit: auditKeys });
+    }
+
+    // Writes a backup object (from /admin/backup) back into KV. Owner only.
+    // Additive/overwriting per key — it does not first wipe state that isn't
+    // present in the backup, so restoring an older snapshot won't erase
+    // moderation added since, only overwrite records the backup actually has.
+    if (url.pathname === '/admin/restore' && req.method === 'POST') {
+      const kv = env && env.TELEMETRY;
+      if (!kv) return json({ error: 'telemetry KV not bound' }, 500);
+      const denied = requireOwner(url, env);
+      if (denied) return denied;
+      let body = {};
+      try { body = JSON.parse(await req.text()); } catch (e) { return json({ error: 'invalid JSON body' }, 400); }
+      let restored = 0;
+      if (body.config && typeof body.config === 'object') { await kv.put('config', JSON.stringify(body.config)); restored++; }
+      for (const group of [body.mods, body.rooms, body.roomCfgs]) {
+        if (!group || typeof group !== 'object') continue;
+        for (const [key, val] of Object.entries(group)) { await kv.put(key, JSON.stringify(val)); restored++; }
+      }
+      if (Array.isArray(body.audit)) {
+        for (const item of body.audit) {
+          if (!item || !item.key || !item.entry) continue;
+          await kv.put(item.key, JSON.stringify(item.entry), { expirationTtl: AUDIT_TTL });
+          restored++;
+        }
+      }
+      await logAudit(kv, { route: '/admin/restore', action: 'restore', target: null, admin: 'owner' });
+      return json({ ok: true, restored });
     }
 
     // ---- /read?url=… : server-side page fetch for research mode ----
@@ -542,16 +925,58 @@ export default {
     // own key in direct mode — those bypass the worker entirely.)
     const modUser = req.headers.get('X-GPA-User');
     let assignedKey = '';
+    // Config-driven checks that apply to every /v1/* call, whether or not it
+    // carries X-GPA-User (Origin/country are request-level, not user-level).
+    // Both are opt-in: empty lists (the default) allow everything, so this
+    // changes nothing until the owner configures them.
+    let vCfg = null;
+    if (env && env.TELEMETRY) {
+      vCfg = await getConfig(env.TELEMETRY);
+      const country = String((req.cf && req.cf.country) || '').toUpperCase();
+      if (vCfg.blockedCountries.length && vCfg.blockedCountries.includes(country)) {
+        return json({ error: { message: 'This service is not available in your region.', type: 'region_blocked' } }, 403);
+      }
+      const origin = req.headers.get('Origin');
+      if (vCfg.allowedOrigins.length && origin && !vCfg.allowedOrigins.includes(origin)) {
+        return json({ error: { message: 'Requests from this origin are not allowed.', type: 'origin_blocked' } }, 403);
+      }
+    }
     if (modUser && env && env.TELEMETRY) {
       const r = await resolve(env.TELEMETRY, modUser);   // owner resolves to active
       if (r.state === 'blocked') {
         return json({ error: { message: 'Access to this tool has been blocked by the owner.' + (r.reason ? ' ' + r.reason : ''), type: 'blocked_by_owner' } }, 403);
       }
+      if (!r.owner) {
+        const mod = await getMod(env.TELEMETRY, modUser);
+        // Approval queue: a brand-new user (see /track) can't reach the
+        // model at all until /admin/moderate action "approve".
+        if (mod.pending) {
+          return json({ error: { message: 'Your access is awaiting approval from the owner.', type: 'awaiting_approval' } }, 403);
+        }
+        // Per-user AI freeze: chat and /read keep working, only this route
+        // is cut off — a lighter lever than a full block.
+        if (mod.aiFrozen) {
+          return json({ error: { message: 'AI access has been frozen by the owner.', type: 'ai_frozen' } }, 403);
+        }
+      }
+      // Per-user daily request cap (see /admin/config's dailyQuota, 0 =
+      // unlimited). The owner is exempt. Counted per calendar day (UTC) with
+      // a 2-day TTL so old counters clean themselves up — no cron needed.
+      if (!r.owner && vCfg && vCfg.dailyQuota > 0) {
+        const day = new Date().toISOString().slice(0, 10);
+        const qKey = `usage:${day}:${String(modUser).toLowerCase()}`;
+        const used = parseInt(await env.TELEMETRY.get(qKey), 10) || 0;
+        if (used >= vCfg.dailyQuota) {
+          return json({ error: { message: `Daily request limit reached (${vCfg.dailyQuota}/day). Ask the owner to raise it, or try again tomorrow.`, type: 'quota_exceeded' } }, 429);
+        }
+        await env.TELEMETRY.put(qKey, String(used + 1), { expirationTtl: 60 * 60 * 24 * 2 });
+      }
       // An owner-assigned key (see /admin/assignkey) always wins over
-      // whatever the client sent, and never leaves the server — the user's
-      // browser never has to know or hold this value.
+      // whatever the client sent. A key aimed at this exact user wins over
+      // an "assign to everyone" key.
       try {
-        const rec = await env.TELEMETRY.get('key:openai:' + String(modUser).toLowerCase(), 'json');
+        const specific = await env.TELEMETRY.get('key:openai:' + String(modUser).toLowerCase(), 'json');
+        const rec = specific || await env.TELEMETRY.get('key:openai:*', 'json');
         if (rec && rec.key) assignedKey = rec.key;
       } catch (e) { /* fall back to whatever the client sent */ }
     }
@@ -568,18 +993,31 @@ export default {
     //      compromised once used and rotated.
     let bodyText;
     let keyFromBody = '';
+    let parsedBody = null;
 
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       bodyText = await req.text();
       if (bodyText) {
         try {
-          const parsed = JSON.parse(bodyText);
-          if (parsed && typeof parsed._gpa_key === 'string') {
-            keyFromBody = parsed._gpa_key;
-            delete parsed._gpa_key;          // never forward it upstream
-            bodyText = JSON.stringify(parsed);
+          parsedBody = JSON.parse(bodyText);
+          if (parsedBody && typeof parsedBody._gpa_key === 'string') {
+            keyFromBody = parsedBody._gpa_key;
+            delete parsedBody._gpa_key;          // never forward it upstream
+            bodyText = JSON.stringify(parsedBody);
           }
         } catch (e) { /* not JSON — forward untouched */ }
+      }
+    }
+
+    // Server-side model/token caps (see /admin/config's allowedModels and
+    // maxTokens). Defaults — an empty allowlist and a 0 cap — allow anything,
+    // so this is a no-op until the owner configures it.
+    if (vCfg && parsedBody && typeof parsedBody === 'object') {
+      if (vCfg.allowedModels.length && parsedBody.model && !vCfg.allowedModels.includes(parsedBody.model)) {
+        return json({ error: { message: `Model "${parsedBody.model}" is not allowed.`, type: 'model_not_allowed' } }, 400);
+      }
+      if (vCfg.maxTokens > 0 && typeof parsedBody.max_tokens === 'number' && parsedBody.max_tokens > vCfg.maxTokens) {
+        return json({ error: { message: `max_tokens exceeds the configured cap of ${vCfg.maxTokens}.`, type: 'max_tokens_exceeded' } }, 400);
       }
     }
 
