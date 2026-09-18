@@ -2688,6 +2688,7 @@ function modelSupportsReasoning(id) { return REASONING_MODELS.has((id || '').tri
       : 'https://api.openai.com/v1/chat/completions';
 
     payload.model = effectiveModel(OPENAI_MODEL, hard);
+    if (modelSupportsReasoning(payload.model)) payload.reasoning_effort = reasoningEffort;
     noteModelUsed(payload.model, 'OpenAI', hard);
     const temp = effectiveTemp();
     if (temp !== null) payload.temperature = temp;
