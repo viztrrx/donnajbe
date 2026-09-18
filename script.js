@@ -396,6 +396,27 @@ function modelSupportsReasoning(id) { return REASONING_MODELS.has((id || '').tri
       </div>
 
       <div class="gpa-pane" data-pane="ask">
+  <div class="gpa-row" style="justify-content:space-between; align-items:center;">
+    <span class="gpa-sub" style="flex:1;">Ask AI &mdash; remembers this conversation</span>
+    <button id="gpa-ask-new" class="gpa-btn" title="Start a fresh conversation (clears memory)">🗑 New</button>
+    <button id="gpa-ask-settings-btn" class="gpa-btn" title="Study settings">⚙️</button>
+  </div>
+  <div id="gpa-ask-settings" style="display:none; margin-bottom:8px; padding:8px; border:1px dashed var(--gpa-accent,#888); border-radius:8px;">
+    <label class="gpa-sub" for="gpa-ask-subject">Subject</label>
+    <input id="gpa-ask-subject" class="gpa-input" placeholder="e.g. AP Chemistry, Algebra II, US History" autocomplete="off" />
+    <label class="gpa-sub" for="gpa-ask-level" style="display:block; margin-top:6px;">Level / complexity</label>
+    <select id="gpa-ask-level" class="gpa-input">
+      <option value="simple">Explain simply (beginner)</option>
+      <option value="standard" selected>Standard</option>
+      <option value="advanced">Advanced / in-depth</option>
+      <option value="exam">Exam-prep — show the working</option>
+    </select>
+    <label class="gpa-sub" for="gpa-ask-context" style="display:block; margin-top:6px;">Anything else the AI should know</label>
+    <textarea id="gpa-ask-context" class="gpa-sync-box" style="height:52px;" placeholder="e.g. Test on Friday; prefer step-by-step; I already know basic derivatives."></textarea>
+    <div class="gpa-row" style="margin-top:6px;">
+      <button id="gpa-ask-settings-save" class="gpa-btn primary" style="flex:1;">Save</button>
+    </div>
+  </div>
   <div id="gpa-chat" class="gpa-chat"></div>
   <div class="gpa-row" style="flex-wrap:wrap;">
     <span class="gpa-sub" style="flex:1 0 100%;">Reasoning effort</span>
