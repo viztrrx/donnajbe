@@ -4846,10 +4846,21 @@ function modelSupportsReasoning(id) { return REASONING_MODELS.has((id || '').tri
   let askHistory = [];              // [{ role:'user'|'assistant', content }]
   const ASK_MEMORY_TURNS = 12;      // how many past messages to send back each time
 
-  function addMsg(role, text) {
+  function addMsg(role, text, images) {
     const div = document.createElement('div');
     div.className = 'gpa-msg ' + role;
     div.textContent = text;
+    if (images && images.length) {
+      const strip = document.createElement('div');
+      strip.style.cssText = 'display:flex; flex-wrap:wrap; gap:4px; margin-top:4px;';
+      images.forEach((url) => {
+        const im = document.createElement('img');
+        im.src = url;
+        im.style.cssText = 'width:48px; height:48px; object-fit:cover; border-radius:4px;';
+        strip.appendChild(im);
+      });
+      div.appendChild(strip);
+    }
     chatEl.appendChild(div);
     chatEl.scrollTop = chatEl.scrollHeight;
     return div;
