@@ -1966,7 +1966,27 @@ function modelSupportsReasoning(id) { return REASONING_MODELS.has((id || '').tri
       else requestAnimationFrame(() => { if (typeof fitGameToStage === 'function') fitGameToStage(); });
     });
   });
-
+(function wireReasoning() {
+  const btns = panel.querySelectorAll('.gpa-reason');
+  const note = panel.querySelector('#gpa-reason-note');
+  function refresh() {
+    const active = modelSupportsReasoning(effectiveModel(OPENAI_MODEL, false));
+    btns.forEach((b) => {
+      b.classList.toggle('primary', b.dataset.reason === reasoningEffort);
+      b.disabled = !active;
+      b.style.opacity = active ? '' : '0.4';
+    });
+    if (note) note.textContent = active ? ''
+      : "Current model doesn't support reasoning effort — set a reasoning model (e.g. gpt-6-astra) in the admin model override.";
+  }
+  btns.forEach((b) => b.addEventListener('click', () => {
+    if (b.disabled) return;
+    reasoningEffort = b.dataset.reason;
+    localStorage.setItem(REASON_KEY, reasoningEffort);
+    refresh();
+  }));
+  refresh();
+})();
   // ---- Theme swatches -----------------------------------------------------
   panel.querySelectorAll('.gpa-swatch').forEach((btn) => {
     btn.addEventListener('click', () => applyTheme(btn.dataset.theme));
