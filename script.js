@@ -424,12 +424,15 @@ function modelSupportsReasoning(id) { return REASONING_MODELS.has((id || '').tri
     <button class="gpa-btn gpa-reason primary" data-reason="medium" style="flex:1;">Medium</button>
     <button class="gpa-btn gpa-reason" data-reason="high" style="flex:1;">High</button>
   </div>
-  <div id="gpa-reason-note" class="gpa-sub" style="margin:2px 0 6px;"></div>
+    <div id="gpa-reason-note" class="gpa-sub" style="margin:2px 0 6px;"></div>
+  <div id="gpa-ask-images" class="gpa-row" style="flex-wrap:wrap; gap:6px; display:none; margin-bottom:6px;"></div>
   <div class="gpa-row">
-    <input id="gpa-ask-input" class="gpa-input" placeholder="Ask me anything…" />
+    <input id="gpa-ask-input" class="gpa-input" placeholder="Ask me anything… (paste an image too)" />
+    <button id="gpa-ask-attach" class="gpa-btn" title="Attach an image">📎</button>
     <button id="gpa-ask-btn" class="gpa-btn primary">Send</button>
     <button id="gpa-voice-btn" class="gpa-btn" title="Speak your question">🎙</button>
   </div>
+  <input id="gpa-ask-file" type="file" accept="image/*" multiple style="display:none;" />
 </div>
 
       <div class="gpa-pane" data-pane="chat">
