@@ -112,7 +112,8 @@ export default {
           '/v1/*', '/read', '/track', '/status', '/health',
           '/chat/poll', '/chat/send',
           '/admin/summary', '/admin/moderate', '/admin/setunlock', '/unlock',
-          '/admin/config', '/admin/clear', '/admin/clearchat', '/admin/rooms'
+          '/admin/config', '/admin/clear', '/admin/clearchat', '/admin/rooms',
+          '/admin/assignkey'
         ]
       });
     }
@@ -366,6 +367,33 @@ export default {
       return json({ ok: true, rooms });
     }
 
+    // Owner assigns a specific OpenAI key to one user. The key is stored here
+    // (never sent to the browser) and the /v1/* forwarder below prefers it
+    // over anything the client supplies, so it takes effect immediately and
+    // stays in force until the owner clears it — the user never sees or
+    // handles the key at all. Only OpenAI is supported: those calls already
+    // route through this worker, so the key never has to leave the server.
+    // Gemini calls go straight from the browser to Google and can't be
+    // covered this way without exposing the key to that browser.
+    if (url.pathname === '/admin/assignkey' && req.method === 'POST') {
+      const kv = env && env.TELEMETRY;
+      const ADMIN = (env && env.ADMIN_TOKEN) || '';
+      if (!kv) return json({ error: 'telemetry KV not bound' }, 500);
+      if (!ADMIN || (url.searchParams.get('token') || '') !== ADMIN) return json({ error: 'unauthorized' }, 401);
+      let body = {};
+      try { body = JSON.parse(await req.text()); } catch (e) { /* tolerate */ }
+      const user = String(body.user || '').toLowerCase().slice(0, 80);
+      if (!user) return json({ error: 'no user' }, 400);
+      const key = String(body.key || '').trim();
+      const rkey = 'key:openai:' + user;
+      if (!key) {
+        await kv.delete(rkey);
+        return json({ ok: true, user, assigned: false });
+      }
+      await kv.put(rkey, JSON.stringify({ key, assignedAt: Date.now() }));
+      return json({ ok: true, user, assigned: true });
+    }
+
     // Owner mints a one-time unlock code for ONE user. We store only its hash,
     // and hand the plaintext back this once for the owner to pass along. The
     // code releases only this username's block, and is consumed on use.
@@ -433,9 +461,12 @@ export default {
       const mods = {};
       const ml = await kv.list({ prefix: 'mod:' });
       for (const k of ml.keys) { const v = await kv.get(k.name, 'json'); if (v) mods[k.name.slice(4)] = v; }
+      const keyed = new Set();
+      const kl = await kv.list({ prefix: 'key:openai:' });
+      kl.keys.forEach((k) => keyed.add(k.name.slice('key:openai:'.length)));
       const stampOne = (x) => {
         const r = resolveState(mods[String(x.user).toLowerCase()] || { state: 'active' }, cfg, x.user);
-        return { ...x, state: r.state, reason: r.reason, owner: !!r.owner, private: !!r.private };
+        return { ...x, state: r.state, reason: r.reason, owner: !!r.owner, private: !!r.private, hasOpenAiKey: keyed.has(String(x.user).toLowerCase()) };
       };
 
       // Collapse multiple live sessions from one user into a single presence.
@@ -510,14 +541,22 @@ export default {
     // Gemini, which the browser calls directly, or a user who supplies their
     // own key in direct mode — those bypass the worker entirely.)
     const modUser = req.headers.get('X-GPA-User');
+    let assignedKey = '';
     if (modUser && env && env.TELEMETRY) {
       const r = await resolve(env.TELEMETRY, modUser);   // owner resolves to active
       if (r.state === 'blocked') {
         return json({ error: { message: 'Access to this tool has been blocked by the owner.' + (r.reason ? ' ' + r.reason : ''), type: 'blocked_by_owner' } }, 403);
       }
+      // An owner-assigned key (see /admin/assignkey) always wins over
+      // whatever the client sent, and never leaves the server — the user's
+      // browser never has to know or hold this value.
+      try {
+        const rec = await env.TELEMETRY.get('key:openai:' + String(modUser).toLowerCase(), 'json');
+        if (rec && rec.key) assignedKey = rec.key;
+      } catch (e) { /* fall back to whatever the client sent */ }
     }
 
-    // The key can arrive four ways, tried in this order:
+    // Absent an assigned key, the key can arrive four ways, tried in order:
     //   1. a normal Authorization header
     //   2. the X-GPA-Key header    — for pages that rewrite Authorization
     //   3. a _gpa_key field in the JSON body — for pages whose wrappers strip
@@ -549,7 +588,8 @@ export default {
     // stray newline), passing it straight to fetch throws a TypeError and the
     // whole worker 500s. Strip it here so the request still goes through.
     const strip = (v) => (v ? String(v).replace(/[^\x21-\x7E]/g, '') : '');
-    const bearer = strip((req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, ''))
+    const bearer = strip(assignedKey)
+      || strip((req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, ''))
       || strip(req.headers.get('X-GPA-Key'))
       || strip(keyFromBody)
       || strip(url.searchParams.get('key'));

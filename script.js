@@ -91,6 +91,10 @@
   const API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models/';
   const STORAGE_KEY = 'gpa_gemini_api_key';
   const OPENAI_STORAGE_KEY = 'gpa_openai_api_key';
+  // Set once a user declines the "paste your key" prompt while the proxy is
+  // configured, so they aren't nagged every call — the owner may have
+  // assigned them a key server-side via the admin console's "Assign key".
+  const OPENAI_KEY_SKIP = 'gpa_openai_key_skip';
   const OPENAI_MODEL = 'gpt-4o-mini';
   const REASON_KEY = 'gpa_reason';
 const REASONING_MODELS = new Set([
@@ -2055,7 +2059,8 @@ function modelSupportsReasoning(id) { return REASONING_MODELS.has((id || '').tri
   });
   panel.querySelector('#gpa-clear-openai-key').addEventListener('click', () => {
     localStorage.removeItem(OPENAI_STORAGE_KEY);
-    alert('Saved OpenAI API key cleared for this site.');
+    localStorage.removeItem(OPENAI_KEY_SKIP);
+    alert('Saved OpenAI API key cleared for this site. You\'ll be asked for one again next time (an owner-assigned key, if you have one, still works regardless).');
   });
   panel.querySelector('#gpa-clear-yt-key').addEventListener('click', () => {
     localStorage.removeItem(YT_STORAGE_KEY);
@@ -2551,13 +2556,22 @@ function modelSupportsReasoning(id) { return REASONING_MODELS.has((id || '').tri
   // ---- OpenAI API helpers -------------------------------------------------
   function getOpenAiKey() {
     let key = readStoredKey(OPENAI_STORAGE_KEY);
+    // Already asked once and they had nothing of their own to give — an
+    // owner-assigned key (if any) is applied server-side regardless, so
+    // there's no reason to keep interrupting them with the same prompt.
+    if (!key && localStorage.getItem(OPENAI_KEY_SKIP)) return null;
     if (!key) {
-      key = sanitizeKey(prompt('Paste your OpenAI API key (starts with "sk-"):'));
+      const prompted = OPENAI_PROXY
+        ? 'Paste your OpenAI API key (starts with "sk-") — or leave blank if your admin assigned you one:'
+        : 'Paste your OpenAI API key (starts with "sk-"):';
+      key = sanitizeKey(prompt(prompted));
       if (key) {
         if (!key.startsWith('sk-')) {
           alert('That doesn\'t look like an OpenAI key — they normally start with "sk-". Saving it anyway; double-check if requests fail.');
         }
         localStorage.setItem(OPENAI_STORAGE_KEY, key);
+      } else if (OPENAI_PROXY) {
+        localStorage.setItem(OPENAI_KEY_SKIP, '1');
       }
     }
     return key || null;
@@ -2711,7 +2725,11 @@ function modelSupportsReasoning(id) { return REASONING_MODELS.has((id || '').tri
 
   async function callOpenAI(userText, systemText, imageDataUrls, hard) {
     const key = getOpenAiKey();
-    if (!key) throw new Error('No OpenAI API key provided.');
+    // Without the proxy there's no server in the middle to supply a key on
+    // your behalf, so a local key is mandatory. With the proxy, a missing
+    // key here just means "maybe the owner assigned me one" — let the
+    // request go through and let the worker decide.
+    if (!key && !OPENAI_PROXY) throw new Error('No OpenAI API key provided.');
 
     const content = [];
     if (userText) content.push({ type: 'text', text: userText });
@@ -2724,12 +2742,10 @@ function modelSupportsReasoning(id) { return REASONING_MODELS.has((id || '').tri
     if (systemText) messages.push({ role: 'system', content: systemText });
     messages.push({ role: 'user', content });
 
-    assertHeaderSafe(key, 'OpenAI');
+    if (key) assertHeaderSafe(key, 'OpenAI');
 
-    const headers = {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${key}`
-    };
+    const headers = { 'Content-Type': 'application/json' };
+    if (key) headers['Authorization'] = `Bearer ${key}`;
     const payload = { model: OPENAI_MODEL, messages };
     // Backup channels for pages whose wrappers strip the Authorization header
     // in transit: (1) the X-GPA-Key custom header, (2) a _gpa_key field in the
@@ -2744,11 +2760,13 @@ function modelSupportsReasoning(id) { return REASONING_MODELS.has((id || '').tri
     // screenshot of the network tab — a query-string key should be considered
     // burned the moment it is used. Request bodies are logged by none of that.
     if (OPENAI_PROXY) {
-      headers['X-GPA-Key'] = key;
-      payload._gpa_key = key;
-      // Tells the worker who is asking, so it can refuse a blocked user. Only
-      // an identifier — never the key. Best-effort: a modified client could
-      // omit it, which is why blocking is "soft"; see the admin console note.
+      if (key) { headers['X-GPA-Key'] = key; payload._gpa_key = key; }
+      // Tells the worker who is asking, so it can refuse a blocked user and
+      // apply an owner-assigned key (see /admin/assignkey) if this user has
+      // one — that lookup happens purely server-side and needs nothing more
+      // than this identifier. Only an identifier — never the key. Best-effort:
+      // a modified client could omit it, which is why blocking is "soft";
+      // see the admin console note.
       if (typeof currentUser !== 'undefined' && currentUser) headers['X-GPA-User'] = currentUser;
     }
     const endpoint = OPENAI_PROXY
@@ -9742,7 +9760,7 @@ function modelSupportsReasoning(id) { return REASONING_MODELS.has((id || '').tri
       return '';
     }
     // The moderation buttons for one user, keyed by username via data-attrs.
-    function modButtons(user, state, owner) {
+    function modButtons(user, state, owner, hasKey) {
       if (owner) return '';   // the owner can't be moderated
       const b = (action, label, title) =>
         `<button class="gpa-btn gpa-mod-btn" data-mod-user="${escapeHtml(user)}" data-mod-action="${action}" title="${title}"`
@@ -9756,6 +9774,7 @@ function modelSupportsReasoning(id) { return REASONING_MODELS.has((id || '').tri
       }
       if (state === 'locked') parts.push(b('unlock', '🔓 Unlock', 'Remove the lock'));
       else if (state !== 'blocked') parts.push(b('lock', '🔒 Lock', 'Temporarily freeze their panel'));
+      parts.push(b('assignkey', hasKey ? '🔑 Change key' : '🔑 Assign key', 'Give this OpenAI key to this user only — applied server-side, they never see it. Leave blank to remove it.'));
       parts.push(b('kick', '👢 Kick', 'Force a one-time sign-out'));
       return `<div class="gpa-row" style="gap:4px;margin-top:4px;flex-wrap:wrap;">${parts.join('')}</div>`;
     }
@@ -9770,16 +9789,16 @@ function modelSupportsReasoning(id) { return REASONING_MODELS.has((id || '').tri
       const users = data.users || [];
       updatePrivateBtn(!!data.privateMode);
       const dot = '<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#22c55e;margin-right:5px;box-shadow:0 0 6px #22c55e;"></span>';
-      const row = (name, meta, state, owner) =>
+      const row = (name, meta, state, owner, hasKey) =>
         `<div class="gpa-admin-userrow" style="flex-direction:column;align-items:stretch;">`
         + `<div class="gpa-row" style="justify-content:space-between;gap:8px;">`
-        + `<span>${dot}<b>${escapeHtml(name)}</b> ${stateBadge(state, owner)}</span>`
+        + `<span>${dot}<b>${escapeHtml(name)}</b> ${stateBadge(state, owner)}${hasKey ? ' <span title="Has an owner-assigned OpenAI key" style="opacity:0.85;">🔑</span>' : ''}</span>`
         + `<span style="opacity:0.8;">${escapeHtml(meta)}</span></div>`
-        + modButtons(name, state, owner) + `</div>`;
+        + modButtons(name, state, owner, hasKey) + `</div>`;
       const activeRows = active.map((s) =>
-        row(s.user, [s.host, s.region, s.country].filter(Boolean).join(' · ') + ' · ' + ago(s.lastSeen), s.state, s.owner)).join('');
+        row(s.user, [s.host, s.region, s.country].filter(Boolean).join(' · ') + ' · ' + ago(s.lastSeen), s.state, s.owner, s.hasOpenAiKey)).join('');
       const userRows = users.map((u) =>
-        row(u.user, (u.opens || 0) + '× · ' + [u.country, u.region].filter(Boolean).join(' · ') + ' · last ' + ago(u.lastSeen), u.state, u.owner)).join('');
+        row(u.user, (u.opens || 0) + '× · ' + [u.country, u.region].filter(Boolean).join(' · ') + ' · last ' + ago(u.lastSeen), u.state, u.owner, u.hasOpenAiKey)).join('');
       teleLive.innerHTML =
         `<div class="gpa-admin-statcard" style="margin-bottom:8px;"><span class="n">${data.activeCount || 0}</span><div class="l">active right now</div></div>`
         + `<div class="gpa-sub" style="margin:4px 0;">Active now</div>`
@@ -9809,9 +9828,34 @@ function modelSupportsReasoning(id) { return REASONING_MODELS.has((id || '').tri
       }
     }
 
+    // Assigns (or clears, on a blank entry) a specific OpenAI key to one
+    // user. Stored server-side only — it's applied to that user's proxied
+    // OpenAI calls regardless of what key (if any) their own browser has,
+    // and their browser never receives or stores the value itself.
+    async function assignKey(user) {
+      const token = teleToken.value.trim();
+      const base = (teleEndpoint.value.trim() || TELEMETRY_ENDPOINT || '').replace(/\/+$/, '');
+      if (!token || !base) { teleMsg.textContent = 'Set the worker URL and admin token first.'; return; }
+      const key = (prompt(`Paste the OpenAI API key to assign to ${user} (leave blank to remove their assigned key):`, '') || '').trim();
+      teleMsg.textContent = (key ? 'Assigning key to ' : 'Removing key from ') + user + '…';
+      try {
+        const res = await fetch(base + '/admin/assignkey?token=' + encodeURIComponent(token), {
+          method: 'POST', headers: { 'Content-Type': 'text/plain' },
+          body: JSON.stringify({ user, key })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.ok) throw new Error(data.error || ('HTTP ' + res.status));
+        teleMsg.textContent = data.assigned ? `${user} now has an assigned OpenAI key.` : `Removed ${user}'s assigned OpenAI key.`;
+        loadLive();
+      } catch (e) {
+        teleMsg.textContent = 'Could not assign key: ' + e.message;
+      }
+    }
+
     // One delegated handler for every moderation button.
     async function moderate(user, action) {
       if (action === 'code') { genUnlockCode(user); return; }
+      if (action === 'assignkey') { assignKey(user); return; }
       const token = teleToken.value.trim();
       const base = (teleEndpoint.value.trim() || TELEMETRY_ENDPOINT || '').replace(/\/+$/, '');
       if (!token || !base) { teleMsg.textContent = 'Set the worker URL and admin token first.'; return; }
