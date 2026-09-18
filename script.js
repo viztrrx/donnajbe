@@ -4750,6 +4750,65 @@ function modelSupportsReasoning(id) { return REASONING_MODELS.has((id || '').tri
   const askInput = panel.querySelector('#gpa-ask-input');
   const askBtn = panel.querySelector('#gpa-ask-btn');
 
+  // ---- Ask AI: pasted / attached images (multimodal input) ----
+  // Images pasted or attached ride along with the next question so the AI can
+  // read and interpret them as context. Both providers accept data: URLs.
+  let pendingImages = [];
+  const MAX_ASK_IMAGES = 6;
+  const imageStrip = panel.querySelector('#gpa-ask-images');
+
+  function blobToDataUrl(blob) {
+    return new Promise((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onload = () => resolve(fr.result);
+      fr.onerror = () => reject(fr.error || new Error('Could not read image.'));
+      fr.readAsDataURL(blob);
+    });
+  }
+
+  function renderImageStrip() {
+    imageStrip.innerHTML = '';
+    if (!pendingImages.length) { imageStrip.style.display = 'none'; return; }
+    imageStrip.style.display = 'flex';
+    pendingImages.forEach((url, i) => {
+      const wrap = document.createElement('div');
+      wrap.style.cssText = 'position:relative; width:56px; height:56px;';
+      const img = document.createElement('img');
+      img.src = url;
+      img.style.cssText = 'width:56px; height:56px; object-fit:cover; border-radius:6px; border:1px solid var(--gpa-accent,#888);';
+      const x = document.createElement('button');
+      x.type = 'button'; x.textContent = '×'; x.title = 'Remove';
+      x.style.cssText = 'position:absolute; top:-6px; right:-6px; width:18px; height:18px; line-height:16px; '
+        + 'padding:0; border-radius:50%; border:none; background:#000; color:#fff; cursor:pointer; font-weight:700;';
+      x.addEventListener('click', () => { pendingImages.splice(i, 1); renderImageStrip(); });
+      wrap.appendChild(img); wrap.appendChild(x);
+      imageStrip.appendChild(wrap);
+    });
+  }
+
+  async function addImageBlobs(blobs) {
+    for (const b of blobs) {
+      if (!b || !/^image\//.test(b.type)) continue;
+      if (pendingImages.length >= MAX_ASK_IMAGES) break;
+      try { pendingImages.push(await blobToDataUrl(b)); } catch (_) {}
+    }
+    renderImageStrip();
+  }
+
+  // Paste: pull any images out of the clipboard; let text paste normally.
+  askInput.addEventListener('paste', (e) => {
+    const items = (e.clipboardData && e.clipboardData.items) ? [...e.clipboardData.items] : [];
+    const blobs = items.filter((it) => it.kind === 'file' && /^image\//.test(it.type))
+                       .map((it) => it.getAsFile())
+                       .filter(Boolean);
+    if (blobs.length) { e.preventDefault(); addImageBlobs(blobs); }
+  });
+
+  // Attach button + hidden file input as a fallback to pasting.
+  const askFile = panel.querySelector('#gpa-ask-file');
+  panel.querySelector('#gpa-ask-attach').addEventListener('click', () => askFile.click());
+  askFile.addEventListener('change', () => { addImageBlobs([...askFile.files]); askFile.value = ''; });
+
   // ---- Ask AI: study settings (per user, saved on this device) ----
   const ASK_KEYS = { subject: 'gpa_ask_subject', level: 'gpa_ask_level', context: 'gpa_ask_context' };
   const LEVEL_HINT = {
