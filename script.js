@@ -4927,15 +4927,15 @@ function modelSupportsReasoning(id) { return REASONING_MODELS.has((id || '').tri
     const transcript = askHistory.slice(-ASK_MEMORY_TURNS)
       .map((m) => (m.role === 'user' ? 'USER: ' : 'ASSISTANT: ') + m.content)
       .join('\n');
-    const userText = (transcript ? 'CONVERSATION SO FAR:\n' + transcript + '\n\n' : '') + 'NEW MESSAGE:\n' + q;
+      const qForModel = q || 'Please read and interpret the attached image(s) and help me with what they show.';
+    const userText = (transcript ? 'CONVERSATION SO FAR:\n' + transcript + '\n\n' : '')
+      + 'NEW MESSAGE:\n' + qForModel
+      + (imgs.length ? '\n\n(' + imgs.length + ' image' + (imgs.length > 1 ? 's' : '') + ' attached below — read them as part of this question.)' : '');
 
     try {
-      const out = await callAI(userText, sys, null, isHardQuestion(q));
+      const out = await callAI(userText, sys, imgs.length ? imgs : null, isHardQuestion(q));
       const { text: cleanText, confidence } = extractConfidenceLine(out);
-      askHistory.push({ role: 'user', content: q }, { role: 'assistant', content: cleanText });
-      if (askHistory.length > 40) askHistory = askHistory.slice(-40);
-      renderAskReply(thinking, cleanText, confidence, () => {
-        speak(cleanText);
+      askHistory.push({ role: 'user', content: qForModel }, { role: 'assistant', content: cleanText });
         if (isHardQuestion(q)) maybeSuggestBetterModel(chatEl);
       });
     } catch (e) {
