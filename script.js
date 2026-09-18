@@ -4927,7 +4927,7 @@ function modelSupportsReasoning(id) { return REASONING_MODELS.has((id || '').tri
     const transcript = askHistory.slice(-ASK_MEMORY_TURNS)
       .map((m) => (m.role === 'user' ? 'USER: ' : 'ASSISTANT: ') + m.content)
       .join('\n');
-      const qForModel = q || 'Please read and interpret the attached image(s) and help me with what they show.';
+    const qForModel = q || 'Please read and interpret the attached image(s) and help me with what they show.';
     const userText = (transcript ? 'CONVERSATION SO FAR:\n' + transcript + '\n\n' : '')
       + 'NEW MESSAGE:\n' + qForModel
       + (imgs.length ? '\n\n(' + imgs.length + ' image' + (imgs.length > 1 ? 's' : '') + ' attached below — read them as part of this question.)' : '');
