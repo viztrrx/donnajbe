@@ -5113,11 +5113,22 @@ function modelSupportsReasoning(id) { return REASONING_MODELS.has((id || '').tri
 
   // Keeps polling regardless of which tab is open or whether the panel is
   // minimized, so unread counts and @mention notifications stay live even
-  // while the user isn't looking at Chat.
+  // while the user isn't looking at Chat. Polls fast (near-instant) while
+  // Chat is actually the thing on screen, and backs off while it's just
+  // running in the background so it isn't hammering the worker all day.
+  const CHAT_POLL_ACTIVE_MS = 1500;
+  const CHAT_POLL_BACKGROUND_MS = 8000;
+  function scheduleChatPoll() {
+    const delay = chatIsOpenAndVisible() ? CHAT_POLL_ACTIVE_MS : CHAT_POLL_BACKGROUND_MS;
+    chatTimer = setTimeout(async () => {
+      await chatPoll();
+      scheduleChatPoll();
+    }, delay);
+  }
   function startChatPolling() {
     if (chatTimer) return;
     chatPoll();
-    chatTimer = setInterval(chatPoll, 6000);
+    scheduleChatPoll();
   }
 
   async function chatSend() {

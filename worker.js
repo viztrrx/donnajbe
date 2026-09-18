@@ -37,7 +37,14 @@ export default {
       const m = await kv.get('mod:' + String(user).toLowerCase(), 'json');
       return m || { state: 'active', reason: '', kickNonce: 0 };
     };
-    const getConfig = async (kv) => (kv && (await kv.get('config', 'json'))) || { privateMode: false };
+    // Global, owner-controlled settings pushed to every client on its next
+    // status poll: private mode, a broadcast banner, a reload counter the
+    // clients compare against to force-refresh, and feature kill-switches.
+    const CONFIG_DEFAULTS = { privateMode: false, broadcast: '', reloadVersion: 0, features: {}, announcement: null };
+    const getConfig = async (kv) => {
+      const stored = kv ? await kv.get('config', 'json') : null;
+      return { ...CONFIG_DEFAULTS, ...(stored || {}) };
+    };
 
     // Effective state for one user, combining their own moderation record with
     // global config. Order: owner is always active; an explicit block/lock
@@ -79,6 +86,36 @@ export default {
     // TTL, so a user drops off the live list on their own ~2.5 min after their
     // last heartbeat, with no cleanup job.
     const SESSION_TTL = 150;        // seconds a session counts as "active"
+
+    // Health/diagnostics. Safe to call without a token: it reports only whether
+    // things are CONFIGURED, never any secret value. The admin panel's
+    // Diagnostics tab uses it to tell you exactly what still needs wiring up.
+    if (url.pathname === '/health') {
+      const kv = env && env.TELEMETRY;
+      let kvWritable = false;
+      if (kv) {
+        try { await kv.put('health:ping', String(Date.now()), { expirationTtl: 60 }); kvWritable = true; } catch (e) { kvWritable = false; }
+      }
+      let cfg = { privateMode: false };
+      try { cfg = await getConfig(kv); } catch (e) { /* unbound */ }
+      return json({
+        ok: true,
+        worker: 'agent-console',
+        time: Date.now(),
+        owner: OWNER,
+        kvBound: !!kv,
+        kvWritable,
+        adminTokenSet: !!(env && env.ADMIN_TOKEN),
+        telemetryReady: !!kv && !!(env && env.ADMIN_TOKEN),
+        privateMode: !!cfg.privateMode,
+        routes: [
+          '/v1/*', '/read', '/track', '/status', '/health',
+          '/chat/poll', '/chat/send',
+          '/admin/summary', '/admin/moderate', '/admin/setunlock', '/unlock',
+          '/admin/config', '/admin/clear', '/admin/clearchat', '/admin/rooms'
+        ]
+      });
+    }
 
     if (url.pathname === '/track' && req.method === 'POST') {
       const kv = env && env.TELEMETRY;
@@ -122,7 +159,13 @@ export default {
       // block/lock/kick/private-mode change reaches them within one heartbeat
       // even without the separate /status poll.
       const r = await resolve(kv, user);
-      return json({ ok: true, state: r.state, reason: r.reason, kickNonce: r.kickNonce, owner: !!r.owner, private: !!r.private });
+      const cfg = await getConfig(kv);
+      return json({
+        ok: true, state: r.state, reason: r.reason, kickNonce: r.kickNonce,
+        owner: !!r.owner, private: !!r.private,
+        broadcast: cfg.broadcast || '', reloadVersion: cfg.reloadVersion || 0, features: cfg.features || {},
+        announcement: cfg.announcement || null
+      });
     }
 
     // Read-only status for one user — the client polls this so a block takes
@@ -130,7 +173,13 @@ export default {
     if (url.pathname === '/status' && req.method === 'GET') {
       const kv = env && env.TELEMETRY;
       const r = await resolve(kv, url.searchParams.get('user') || '');
-      return json({ state: r.state, reason: r.reason, kickNonce: r.kickNonce, owner: !!r.owner, private: !!r.private });
+      const cfg = await getConfig(kv);
+      return json({
+        state: r.state, reason: r.reason, kickNonce: r.kickNonce,
+        owner: !!r.owner, private: !!r.private,
+        broadcast: cfg.broadcast || '', reloadVersion: cfg.reloadVersion || 0, features: cfg.features || {},
+        announcement: cfg.announcement || null
+      });
     }
 
     // Owner sets a user's moderation state. Token-gated like the other admin
@@ -171,8 +220,150 @@ export default {
       try { body = JSON.parse(await req.text()); } catch (e) { /* tolerate */ }
       const cfg = await getConfig(kv);
       if ('privateMode' in body) cfg.privateMode = !!body.privateMode;
+      if ('broadcast' in body) cfg.broadcast = String(body.broadcast || '').slice(0, 400);
+      // An announcement is a modal everyone sees once. A fresh id each time is
+      // what makes it pop again rather than being silently ignored as "seen".
+      if ('announcement' in body) {
+        const a = body.announcement;
+        cfg.announcement = (a && (a.text || a.title))
+          ? { id: 'a' + Date.now().toString(36), title: String(a.title || 'Announcement').slice(0, 80), text: String(a.text || '').slice(0, 600), ts: Date.now() }
+          : null;
+      }
+      if (body.features && typeof body.features === 'object') cfg.features = { ...cfg.features, ...body.features };
+      // Bumping this makes every client notice it is out of date on its next
+      // status poll and pull the latest script.
+      if (body.bumpReload) cfg.reloadVersion = (cfg.reloadVersion || 0) + 1;
       await kv.put('config', JSON.stringify(cfg));
       return json({ ok: true, config: cfg, owner: OWNER });
+    }
+
+    // ==== Chat ==============================================================
+    //
+    // One public room everyone can use, plus private rooms the owner creates.
+    // A private room is gated by a secret code: the hash is stored, the code
+    // is shown once, and every read and write must present it. That is a real
+    // shared secret rather than a username check — usernames here are
+    // self-asserted, so gating on them alone would stop nobody.
+    //
+    // Messages are stored in the KV key's METADATA with an empty value, so
+    // polling a room is a single list() call with no per-message reads, and
+    // they expire on their own via TTL rather than needing a cleanup job.
+    // The TTL is a backstop only — the real daily reset is the Cron Trigger
+    // at the bottom of this file, which wipes every room's messages outright.
+    const CHAT_TTL = 60 * 60 * 24 * 7;   // messages live a week at most
+    const CHAT_MAX = 120;                // messages returned per poll
+    const pad = (n) => String(n).padStart(13, '0');
+    const roomKey = (id) => 'room:' + String(id).toLowerCase().slice(0, 40);
+
+    // Returns { ok } or { ok:false, error } for a room + supplied code.
+    const checkRoomAccess = async (kv, roomId, code) => {
+      const id = String(roomId || 'public').toLowerCase().slice(0, 40);
+      if (id === 'public') return { ok: true, id };
+      if (!kv) return { ok: false, error: 'chat storage not configured' };
+      const room = await kv.get(roomKey(id), 'json');
+      if (!room) return { ok: false, error: 'no such room' };
+      const h = await sha256hex(id + '|' + String(code || '').trim().toUpperCase());
+      if (h !== room.codeHash) return { ok: false, error: 'wrong room code' };
+      return { ok: true, id, room };
+    };
+
+    if (url.pathname === '/chat/send' && req.method === 'POST') {
+      const kv = env && env.TELEMETRY;
+      if (!kv) return json({ ok: false, error: 'chat storage not configured' }, 200);
+      let body = {};
+      try { body = JSON.parse(await req.text()); } catch (e) { /* tolerate */ }
+      const user = String(body.user || 'anonymous').slice(0, 40);
+      const text = String(body.text || '').trim().slice(0, 500);
+      if (!text) return json({ ok: false, error: 'empty message' }, 200);
+      // A blocked user (or anyone shut out by private mode) can't post.
+      const st = await resolve(kv, user);
+      if (st.state === 'blocked') return json({ ok: false, error: 'You are blocked from chat.' }, 200);
+      const access = await checkRoomAccess(kv, body.room, body.code);
+      if (!access.ok) return json({ ok: false, error: access.error }, 200);
+      const ts = Date.now();
+      const key = `msg:${access.id}:${pad(ts)}:${Math.random().toString(36).slice(2, 7)}`;
+      const meta = { u: user, t: text, ts, owner: String(user).toLowerCase() === OWNER };
+      try {
+        await kv.put(key, '', { expirationTtl: CHAT_TTL, metadata: meta });
+      } catch (e) {
+        return json({ ok: false, error: 'could not store message' }, 200);
+      }
+      return json({ ok: true, ts });
+    }
+
+    if (url.pathname === '/chat/poll' && req.method === 'GET') {
+      const kv = env && env.TELEMETRY;
+      if (!kv) return json({ ok: false, error: 'chat storage not configured', messages: [] }, 200);
+      const access = await checkRoomAccess(kv, url.searchParams.get('room'), url.searchParams.get('code'));
+      if (!access.ok) return json({ ok: false, error: access.error, messages: [] }, 200);
+      const since = parseInt(url.searchParams.get('since') || '0', 10) || 0;
+      const listed = await kv.list({ prefix: `msg:${access.id}:` });
+      const messages = (listed.keys || [])
+        .map((k) => k.metadata)
+        .filter((m) => m && m.ts > since)
+        .sort((a, b) => a.ts - b.ts)
+        .slice(-CHAT_MAX);
+      return json({ ok: true, room: access.id, messages, now: Date.now() });
+    }
+
+    // Owner: manually wipe every room's chat history right now, same routine
+    // the daily Cron Trigger runs. Handy for testing the cron without
+    // waiting for it, or for an ad-hoc reset.
+    if (url.pathname === '/admin/clearchat' && req.method === 'POST') {
+      const kv = env && env.TELEMETRY;
+      const ADMIN = (env && env.ADMIN_TOKEN) || '';
+      if (!kv) return json({ error: 'chat storage not configured' }, 500);
+      if (!ADMIN || (url.searchParams.get('token') || '') !== ADMIN) return json({ error: 'unauthorized' }, 401);
+      const deleted = await clearAllChatMessages(kv);
+      return json({ ok: true, deleted });
+    }
+
+    // Owner: create / list / delete private rooms.
+    if (url.pathname === '/admin/rooms' && req.method === 'POST') {
+      const kv = env && env.TELEMETRY;
+      const ADMIN = (env && env.ADMIN_TOKEN) || '';
+      if (!kv) return json({ error: 'chat storage not configured' }, 500);
+      if (!ADMIN || (url.searchParams.get('token') || '') !== ADMIN) return json({ error: 'unauthorized' }, 401);
+      let body = {};
+      try { body = JSON.parse(await req.text()); } catch (e) { /* tolerate */ }
+      const action = body.action || 'list';
+
+      if (action === 'create') {
+        const name = String(body.name || '').trim().slice(0, 40);
+        if (!name) return json({ error: 'name required' }, 400);
+        const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || ('room' + Date.now().toString(36));
+        if (id === 'public') return json({ error: '"public" is reserved' }, 400);
+        const code = genCode();
+        await kv.put(roomKey(id), JSON.stringify({
+          id, name, codeHash: await sha256hex(id + '|' + code), createdAt: Date.now()
+        }));
+        return json({ ok: true, id, name, code });
+      }
+      if (action === 'delete') {
+        const id = String(body.id || '').toLowerCase().slice(0, 40);
+        if (!id || id === 'public') return json({ error: 'cannot delete that room' }, 400);
+        await kv.delete(roomKey(id));
+        const msgs = await kv.list({ prefix: `msg:${id}:` });
+        for (const k of msgs.keys) await kv.delete(k.name);
+        return json({ ok: true, deleted: id });
+      }
+      if (action === 'newcode') {
+        const id = String(body.id || '').toLowerCase().slice(0, 40);
+        const room = await kv.get(roomKey(id), 'json');
+        if (!room) return json({ error: 'no such room' }, 404);
+        const code = genCode();
+        room.codeHash = await sha256hex(id + '|' + code);
+        await kv.put(roomKey(id), JSON.stringify(room));
+        return json({ ok: true, id, code });
+      }
+      // list
+      const listed = await kv.list({ prefix: 'room:' });
+      const rooms = [];
+      for (const k of listed.keys) {
+        const r = await kv.get(k.name, 'json');
+        if (r) rooms.push({ id: r.id, name: r.name, createdAt: r.createdAt });
+      }
+      return json({ ok: true, rooms });
     }
 
     // Owner mints a one-time unlock code for ONE user. We store only its hash,
@@ -386,5 +577,32 @@ export default {
     const r = new Response(res.body, res);
     r.headers.set('Access-Control-Allow-Origin', '*');
     return r;
+  },
+
+  // Daily chat reset. Cloudflare Cron Triggers run in UTC and don't shift for
+  // daylight saving, so this fixed UTC time drifts by an hour against local
+  // New York time across the DST boundary (early Nov/mid Mar) — set here to
+  // land at local midnight during EST; during EDT it'll fire at 1am instead.
+  // Add/adjust the actual schedule in the dashboard: Workers & Pages →
+  // donnajbe → Triggers → Cron Triggers → Add "0 5 * * *".
+  async scheduled(event, env, ctx) {
+    const kv = env && env.TELEMETRY;
+    if (!kv) return;
+    ctx.waitUntil(clearAllChatMessages(kv));
   }
 };
+
+// Deletes every stored chat message across every room (public and private).
+// Rooms themselves (their codes) are untouched — only the msg: entries under
+// them. Paginates past KV's 1000-keys-per-list() page so this stays correct
+// even if a very chatty day left more than one page of messages.
+async function clearAllChatMessages(kv) {
+  let deleted = 0;
+  let cursor;
+  do {
+    const listed = await kv.list({ prefix: 'msg:', cursor });
+    for (const k of listed.keys) { await kv.delete(k.name); deleted++; }
+    cursor = listed.list_complete ? undefined : listed.cursor;
+  } while (cursor);
+  return deleted;
+}
