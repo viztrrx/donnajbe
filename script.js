@@ -335,7 +335,7 @@ function modelSupportsReasoning(id) { return REASONING_MODELS.has((id || '').tri
         <div class="gpa-dropdown-menu" id="gpa-dropdown-menu">
           <button class="gpa-dropdown-item active" data-tab="scan">Page Insights</button>
           <button class="gpa-dropdown-item" data-tab="ask">Ask AI</button>
-          <button class="gpa-dropdown-item" data-tab="chat">Chat</button>
+          <button class="gpa-dropdown-item" data-tab="chat">Chat<span id="gpa-chat-badge" class="gpa-chat-badge" style="display:none;">0</span></button>
           <button class="gpa-dropdown-item" data-tab="music">Music</button>
           <button class="gpa-dropdown-item" data-tab="browser">Browser</button>
           <button class="gpa-dropdown-item" data-tab="games">Games</button>
@@ -1114,6 +1114,7 @@ function modelSupportsReasoning(id) { return REASONING_MODELS.has((id || '').tri
         opacity: 1; transform: none; pointer-events: auto; overflow: visible;
       }
       .gpa-dropdown-item {
+        position: relative;
         flex: 1; min-width: 58px; text-align: center; padding: 7px 3px;
         font-size: 9px; font-weight: 700; color: ${t.sub}; line-height: 1.3;
         letter-spacing: 0.4px; text-transform: uppercase;
@@ -1129,6 +1130,15 @@ function modelSupportsReasoning(id) { return REASONING_MODELS.has((id || '').tri
         box-shadow: 0 0 12px ${t.accent}77;
       }
       .gpa-dropdown-item.active::before { content: none; }
+      .gpa-chat-badge {
+        position: absolute; top: -5px; right: -5px;
+        min-width: 15px; height: 15px; padding: 0 3px;
+        border-radius: 999px; background: #e5453a; color: #fff;
+        font-size: 9px; font-weight: 700; text-align: center;
+        align-items: center; justify-content: center;
+        box-shadow: 0 0 0 2px ${t.panel};
+        pointer-events: none;
+      }
       .gpa-pane { display: none; }
       .gpa-pane.active {
         display: flex; flex-direction: column; flex: 1; min-height: 0;
@@ -1958,6 +1968,12 @@ function modelSupportsReasoning(id) { return REASONING_MODELS.has((id || '').tri
       particleCanvas.style.display = 'block';
       if (!particleAnimId) stepParticles();
     }
+
+    // Expanding back onto an already-active Chat tab counts as reading it.
+    if (!v) {
+      const chatPane = panel.querySelector('.gpa-pane[data-pane="chat"]');
+      if (chatPane && chatPane.classList.contains('active') && typeof clearChatUnread === 'function') clearChatUnread();
+    }
   }
 
   // ---- Dropdown section switcher -----------------------------------------
@@ -1979,10 +1995,18 @@ function modelSupportsReasoning(id) { return REASONING_MODELS.has((id || '').tri
       panel.querySelectorAll('.gpa-pane').forEach((p) => p.classList.remove('active'));
       item.classList.add('active');
       panel.querySelector(`.gpa-pane[data-pane="${item.dataset.tab}"]`).classList.add('active');
-      dropdownLabel.textContent = item.textContent;
+      // item.textContent would also pull in the chat unread badge's digits.
+      const badge = item.querySelector('.gpa-chat-badge');
+      dropdownLabel.textContent = badge ? item.textContent.replace(badge.textContent, '').trim() : item.textContent;
       dropdown.classList.remove('open');
       if (item.dataset.tab !== 'games') stopActiveGame();
-      if (item.dataset.tab === 'chat' && typeof startChatPolling === 'function') startChatPolling();
+      if (item.dataset.tab === 'chat') {
+        if (typeof startChatPolling === 'function') startChatPolling();
+        if (typeof clearChatUnread === 'function') clearChatUnread();
+        if (window.Notification && Notification.permission === 'default') {
+          try { Notification.requestPermission(); } catch (e) { /* optional */ }
+        }
+      }
       if (item.dataset.tab === 'saved') renderSavedInsights();
       if (item.dataset.tab === 'study') renderDeck();
       // A hidden pane measures as zero, so games can only be sized once
@@ -4958,10 +4982,51 @@ function modelSupportsReasoning(id) { return REASONING_MODELS.has((id || '').tri
   const chatLog = panel.querySelector('#gpa-chat-log');
   const chatInput = panel.querySelector('#gpa-chat-input');
   const chatNote = panel.querySelector('#gpa-chat-note');
+  const chatBadge = panel.querySelector('#gpa-chat-badge');
   let chatRoom = 'public';
   let chatSince = 0;
   let chatTimer = null;
   let chatSeen = new Set();
+  let chatUnread = 0;
+  // True for the poll right after (re)joining a room, so loading its history
+  // doesn't get counted as a pile of new unread messages / mentions.
+  let chatBootstrap = true;
+
+  function updateChatBadge() {
+    if (!chatBadge) return;
+    chatBadge.textContent = chatUnread > 99 ? '99+' : String(chatUnread);
+    chatBadge.style.display = chatUnread > 0 ? 'inline-flex' : 'none';
+  }
+  function clearChatUnread() {
+    if (!chatUnread) return;
+    chatUnread = 0;
+    updateChatBadge();
+  }
+  // "Open" means the Chat tab is the active pane, the panel isn't minimized,
+  // and the browser tab itself is actually in front — matches what a user
+  // means by "I have chat open".
+  function chatIsOpenAndVisible() {
+    if (isMin) return false;
+    const pane = panel.querySelector('.gpa-pane[data-pane="chat"]');
+    if (!pane || !pane.classList.contains('active')) return false;
+    if (typeof document !== 'undefined' && document.hidden) return false;
+    return true;
+  }
+  function mentionsUser(text, user) {
+    if (!text || !user) return false;
+    const escaped = String(user).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp('(^|\\s)@' + escaped + '(?![\\w-])', 'i').test(text);
+  }
+  function notifyMention(m) {
+    try {
+      if (!window.Notification || Notification.permission !== 'granted') return;
+      const n = new Notification(`${m.u} mentioned you in #${chatRoom}`, { body: String(m.t || '').slice(0, 140) });
+      n.onclick = () => { try { window.focus(); } catch (e) {} };
+    } catch (e) { /* optional */ }
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && chatIsOpenAndVisible()) clearChatUnread();
+  });
 
   function joinedRooms() {
     try { return JSON.parse(localStorage.getItem(CHAT_ROOMS_KEY) || '{}') || {}; } catch (e) { return {}; }
@@ -5000,12 +5065,17 @@ function modelSupportsReasoning(id) { return REASONING_MODELS.has((id || '').tri
     const params = new URLSearchParams({ room: chatRoom, since: String(chatSince) });
     const code = chatCodeFor(chatRoom);
     if (code) params.set('code', code);
+    // Snapshot before the request: this poll's messages should only count
+    // toward unread/mentions if the room was already loaded when it started.
+    const wasBootstrap = chatBootstrap;
+    chatBootstrap = false;
     try {
       const res = await fetch(base + '/chat/poll?' + params.toString(), { cache: 'no-store' });
       const data = await res.json().catch(() => ({}));
       if (!data.ok) { chatNote.textContent = data.error || 'Could not load messages.'; return; }
       chatNote.textContent = '';
       const atBottom = chatLog.scrollHeight - chatLog.scrollTop - chatLog.clientHeight < 40;
+      const visible = chatIsOpenAndVisible();
       let added = 0;
       (data.messages || []).forEach((m) => {
         const id = m.ts + '|' + m.u + '|' + m.t;
@@ -5014,13 +5084,19 @@ function modelSupportsReasoning(id) { return REASONING_MODELS.has((id || '').tri
         chatLog.appendChild(chatMsgEl(m));
         chatSince = Math.max(chatSince, m.ts);
         added++;
+        const isMine = currentUser && m.u === currentUser;
+        if (!wasBootstrap && !isMine && !visible) {
+          chatUnread++;
+          if (currentUser && mentionsUser(m.t, currentUser)) notifyMention(m);
+        }
       });
       const empty = chatLog.querySelector('.gpa-chat-empty');
       if (chatLog.children.length && empty) empty.remove();
       if (!chatLog.children.length) chatLog.innerHTML = '<div class="gpa-chat-empty">No messages yet — say something.</div>';
       // Only auto-scroll if they were already at the bottom, so reading back
       // through history isn't yanked away by an incoming message.
-      if (added && atBottom) chatLog.scrollTop = chatLog.scrollHeight;
+      if (added && atBottom && visible) chatLog.scrollTop = chatLog.scrollHeight;
+      if (added) updateChatBadge();
     } catch (e) {
       chatNote.textContent = 'Offline — messages will load when you reconnect.';
     }
@@ -5030,17 +5106,18 @@ function modelSupportsReasoning(id) { return REASONING_MODELS.has((id || '').tri
     chatRoom = id;
     chatSince = 0;
     chatSeen = new Set();
+    chatBootstrap = true;
     chatLog.innerHTML = '<div class="gpa-chat-empty">Loading…</div>';
     chatPoll();
   }
 
+  // Keeps polling regardless of which tab is open or whether the panel is
+  // minimized, so unread counts and @mention notifications stay live even
+  // while the user isn't looking at Chat.
   function startChatPolling() {
     if (chatTimer) return;
     chatPoll();
-    chatTimer = setInterval(() => {
-      const pane = panel.querySelector('.gpa-pane[data-pane="chat"]');
-      if (pane && pane.classList.contains('active')) chatPoll();
-    }, 6000);
+    chatTimer = setInterval(chatPoll, 6000);
   }
 
   async function chatSend() {
@@ -5959,6 +6036,7 @@ function modelSupportsReasoning(id) { return REASONING_MODELS.has((id || '').tri
     // telemetry bin if the owner turned that on. Wrapped so a logging hiccup
     // can never block a sign-in.
     try { logUsageEvent('open', user); startHeartbeat(); } catch (e) { /* logging is best-effort */ }
+    try { if (typeof startChatPolling === 'function') startChatPolling(); } catch (e) { /* chat is best-effort */ }
     loginOverlay.style.display = 'none';
     setLockedChrome(false);
     refreshAccountUI();
