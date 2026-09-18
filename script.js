@@ -1985,7 +1985,7 @@ function modelSupportsReasoning(id) { return REASONING_MODELS.has((id || '').tri
     localStorage.setItem(REASON_KEY, reasoningEffort);
     refresh();
   }));
-  refresh();
+  setTimeout(refresh, 0);
 })();
   // ---- Theme swatches -----------------------------------------------------
   panel.querySelectorAll('.gpa-swatch').forEach((btn) => {
