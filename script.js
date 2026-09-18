@@ -4869,7 +4869,10 @@ function modelSupportsReasoning(id) { return REASONING_MODELS.has((id || '').tri
   panel.querySelector('#gpa-ask-new').addEventListener('click', () => {
     askHistory = [];
     chatEl.innerHTML = '';
+    pendingImages = [];
+    renderImageStrip();
   });
+
 
   // Renders an AI reply with the first line lifted out as a highlighted
   // key-answer chip so it is easy to spot; the rest types in below it.
