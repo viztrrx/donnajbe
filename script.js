@@ -387,13 +387,20 @@
       </div>
 
       <div class="gpa-pane" data-pane="ask">
-        <div id="gpa-chat" class="gpa-chat"></div>
-        <div class="gpa-row">
-          <input id="gpa-ask-input" class="gpa-input" placeholder="Ask me anything…" />
-          <button id="gpa-ask-btn" class="gpa-btn primary">Send</button>
-          <button id="gpa-voice-btn" class="gpa-btn" title="Speak your question">🎙</button>
-        </div>
-      </div>
+  <div id="gpa-chat" class="gpa-chat"></div>
+  <div class="gpa-row" style="flex-wrap:wrap;">
+    <span class="gpa-sub" style="flex:1 0 100%;">Reasoning effort</span>
+    <button class="gpa-btn gpa-reason" data-reason="low" style="flex:1;">Low</button>
+    <button class="gpa-btn gpa-reason primary" data-reason="medium" style="flex:1;">Medium</button>
+    <button class="gpa-btn gpa-reason" data-reason="high" style="flex:1;">High</button>
+  </div>
+  <div id="gpa-reason-note" class="gpa-sub" style="margin:2px 0 6px;"></div>
+  <div class="gpa-row">
+    <input id="gpa-ask-input" class="gpa-input" placeholder="Ask me anything…" />
+    <button id="gpa-ask-btn" class="gpa-btn primary">Send</button>
+    <button id="gpa-voice-btn" class="gpa-btn" title="Speak your question">🎙</button>
+  </div>
+</div>
 
       <div class="gpa-pane" data-pane="chat">
         <div class="gpa-row" style="flex-wrap:wrap;">
