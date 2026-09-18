@@ -4902,9 +4902,12 @@ function modelSupportsReasoning(id) { return REASONING_MODELS.has((id || '').tri
 
   async function sendChat() {
     const q = askInput.value.trim();
-    if (!q) return;
-    addMsg('user', q);
+    const imgs = pendingImages.slice();
+    if (!q && !imgs.length) return;
+    addMsg('user', q || '🖼 (image)', imgs);
     askInput.value = '';
+    pendingImages = [];
+    renderImageStrip();
     const thinking = addMsg('ai', 'Thinking…');
     const s = askSettings();
 
