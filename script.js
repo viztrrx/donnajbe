@@ -9801,6 +9801,8 @@
       ['gpt-5.1', 'gpt-5.1'],
       ['gpt-5.2', 'gpt-5.2 — top general'],
       ['o4-mini', 'o4-mini — reasoning (hard math)'],
+      ['gpt-5.6-luna', 'gpt-5.6-luna'],
+      ['gpt-6-astra', 'gpt-6-astra - strongest model (any subject)'],
       ['__custom__', 'Custom…']
     ];
     function fillModelSelect(sel) {
