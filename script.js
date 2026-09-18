@@ -4747,12 +4747,81 @@ function modelSupportsReasoning(id) { return REASONING_MODELS.has((id || '').tri
   const askInput = panel.querySelector('#gpa-ask-input');
   const askBtn = panel.querySelector('#gpa-ask-btn');
 
+  // ---- Ask AI: study settings (per user, saved on this device) ----
+  const ASK_KEYS = { subject: 'gpa_ask_subject', level: 'gpa_ask_level', context: 'gpa_ask_context' };
+  const LEVEL_HINT = {
+    simple: 'Explain as simply as possible, for a beginner — short words and plain examples.',
+    standard: 'Explain at a normal level.',
+    advanced: 'Give an advanced, in-depth explanation; assume a strong background.',
+    exam: 'This is exam preparation: show the full working and reasoning, not just the result.'
+  };
+  function askSettings() {
+    return {
+      subject: (localStorage.getItem(ASK_KEYS.subject) || '').trim(),
+      level: localStorage.getItem(ASK_KEYS.level) || 'standard',
+      context: (localStorage.getItem(ASK_KEYS.context) || '').trim()
+    };
+  }
+  (function wireAskSettings() {
+    const box = panel.querySelector('#gpa-ask-settings');
+    const subj = panel.querySelector('#gpa-ask-subject');
+    const lvl = panel.querySelector('#gpa-ask-level');
+    const ctx = panel.querySelector('#gpa-ask-context');
+    const s = askSettings();
+    subj.value = s.subject; lvl.value = s.level; ctx.value = s.context;
+    panel.querySelector('#gpa-ask-settings-btn').addEventListener('click', () => {
+      box.style.display = box.style.display === 'none' ? 'block' : 'none';
+    });
+    panel.querySelector('#gpa-ask-settings-save').addEventListener('click', () => {
+      localStorage.setItem(ASK_KEYS.subject, subj.value.trim());
+      localStorage.setItem(ASK_KEYS.level, lvl.value);
+      localStorage.setItem(ASK_KEYS.context, ctx.value.trim());
+      box.style.display = 'none';
+    });
+  })();
+
+  // ---- Ask AI: conversation memory (this session) ----
+  let askHistory = [];              // [{ role:'user'|'assistant', content }]
+  const ASK_MEMORY_TURNS = 12;      // how many past messages to send back each time
+
   function addMsg(role, text) {
     const div = document.createElement('div');
     div.className = 'gpa-msg ' + role;
     div.textContent = text;
     chatEl.appendChild(div);
     chatEl.scrollTop = chatEl.scrollHeight;
+    return div;
+  }
+
+  panel.querySelector('#gpa-ask-new').addEventListener('click', () => {
+    askHistory = [];
+    chatEl.innerHTML = '';
+  });
+
+  // Renders an AI reply with the first line lifted out as a highlighted
+  // key-answer chip so it is easy to spot; the rest types in below it.
+  function renderAskReply(bubble, fullText, confidence, onDone) {
+    const t = THEMES[theme] || THEMES.dark;
+    const nl = fullText.indexOf('\n');
+    let answer, rest;
+    if (nl > -1) { answer = fullText.slice(0, nl).trim(); rest = fullText.slice(nl + 1).trim(); }
+    else { answer = fullText.trim(); rest = ''; }
+    bubble.textContent = '';
+    if (answer) {
+      const chip = document.createElement('div');
+      chip.textContent = answer;
+      chip.style.cssText = 'background:' + t.accent + '22;border:1px solid ' + t.accent + ';'
+        + 'border-left:3px solid ' + t.accent + ';border-radius:6px;padding:6px 8px;margin-bottom:6px;'
+        + 'font-weight:700;color:' + t.text + ';';
+      bubble.appendChild(chip);
+    }
+    const body = document.createElement('div');
+    bubble.appendChild(body);
+    typeText(body, rest, chatEl, () => {
+      appendConfidenceBadge(bubble, confidence);
+      appendModelBadge(bubble);
+      if (onDone) onDone();
+    });
   }
 
   async function sendChat() {
@@ -4760,16 +4829,36 @@ function modelSupportsReasoning(id) { return REASONING_MODELS.has((id || '').tri
     if (!q) return;
     addMsg('user', q);
     askInput.value = '';
-    const thinking = document.createElement('div');
-    thinking.className = 'gpa-msg ai';
-    thinking.textContent = 'Thinking…';
-    chatEl.appendChild(thinking);
-    chatEl.scrollTop = chatEl.scrollHeight;
+    const thinking = addMsg('ai', 'Thinking…');
+    const s = askSettings();
+
+    const steer = [];
+    if (s.subject) steer.push('The user is asking about: ' + s.subject + '.');
+    steer.push(LEVEL_HINT[s.level] || LEVEL_HINT.standard);
+    if (s.context) steer.push('User context: ' + s.context);
+
+    const sys = 'You are a helpful study assistant. ' + CAPABILITIES_BRIEF + ' '
+      + steer.join(' ') + ' '
+      + 'You are given the conversation so far — use it as memory and build on it; do not ask the user to repeat things they have already told you. '
+      + 'Format every reply like this: the FIRST line is the direct answer or key takeaway in one short sentence, then a blank line, then the explanation or working. '
+      + 'Reply in plain text only — no markdown symbols (no asterisks, headers, or lists). '
+      + 'Then, on its own final line, write exactly "CONFIDENCE: NN" where NN (0-100) is your confidence that the answer is accurate.';
+
+    // Fold the running conversation into the message so BOTH providers get memory.
+    const transcript = askHistory.slice(-ASK_MEMORY_TURNS)
+      .map((m) => (m.role === 'user' ? 'USER: ' : 'ASSISTANT: ') + m.content)
+      .join('\n');
+    const userText = (transcript ? 'CONVERSATION SO FAR:\n' + transcript + '\n\n' : '') + 'NEW MESSAGE:\n' + q;
+
     try {
-      const sys = 'You are a helpful, concise assistant. ' + CAPABILITIES_BRIEF + ' Reply in plain conversational sentences only — no markdown formatting (no asterisks, headers, or lists) since this is shown as plain text. Keep answers as short as possible while still being useful. Then, on its own final line, write exactly "CONFIDENCE: NN" where NN (0-100) is your confidence that the answer is accurate.';
-      const out = await callAI(q, sys, null, isHardQuestion(q));
+      const out = await callAI(userText, sys, null, isHardQuestion(q));
       const { text: cleanText, confidence } = extractConfidenceLine(out);
-      typeText(thinking, cleanText, chatEl, () => { appendConfidenceBadge(thinking, confidence); appendModelBadge(thinking); speak(cleanText); if (isHardQuestion(q)) maybeSuggestBetterModel(chatEl); });
+      askHistory.push({ role: 'user', content: q }, { role: 'assistant', content: cleanText });
+      if (askHistory.length > 40) askHistory = askHistory.slice(-40);
+      renderAskReply(thinking, cleanText, confidence, () => {
+        speak(cleanText);
+        if (isHardQuestion(q)) maybeSuggestBetterModel(chatEl);
+      });
     } catch (e) {
       showError(thinking, e, currentProviderLabel());
     }
