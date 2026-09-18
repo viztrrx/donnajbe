@@ -92,6 +92,15 @@
   const STORAGE_KEY = 'gpa_gemini_api_key';
   const OPENAI_STORAGE_KEY = 'gpa_openai_api_key';
   const OPENAI_MODEL = 'gpt-4o-mini';
+  const REASON_KEY = 'gpa_reason';
+const REASONING_MODELS = new Set([
+  'gpt-6-astra',
+  'gpt-5.6-luna',
+  // add other reasoning-capable IDs you allow-list, e.g.:
+  // 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.5-pro',
+]);
+let reasoningEffort = localStorage.getItem(REASON_KEY) || 'medium';
+function modelSupportsReasoning(id) { return REASONING_MODELS.has((id || '').trim()); }
   // Browser→OpenAI calls can be blocked by ad blockers, antivirus shields or
   // network filters (they look like CORS errors). Routing through this proxy
   // avoids that: it forwards to api.openai.com and adds the CORS header.
